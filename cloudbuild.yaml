@@ -4,20 +4,20 @@ options:
 steps:
 - name: 'gcr.io/cloud-builders/docker'
   entrypoint: 'bash'
-  args: ['-c', 'docker pull gcr.io/$PROJECT_ID/exprec:latest || exit 0']
+  args: ['-c', 'docker pull gcr.io/$PROJECT_ID/exprecapp:latest || exit 0']
 
 - name: 'gcr.io/cloud-builders/docker'
   args: [
         'build',
-        '-t', 'gcr.io/$PROJECT_ID/exprec:latest',
-        '--cache-from', 'gcr.io/$PROJECT_ID/exprec:latest',
+        '-t', 'gcr.io/$PROJECT_ID/exprecapp:latest',
+        '--cache-from', 'gcr.io/$PROJECT_ID/exprecapp:latest',
         '--build-arg', 'BUILDKIT_INLINE_CACHE=1',
         '.'
   ]
 
 - name: 'gcr.io/cloud-builders/docker'
   args: [
-        'push', 'gcr.io/$PROJECT_ID/exprec:latest'
+        'push', 'gcr.io/$PROJECT_ID/exprecapp:latest'
   ]
 
 - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -25,11 +25,11 @@ steps:
   args:
     - '-c'
     - |
-      gcloud run deploy exprec \
-      --image gcr.io/$PROJECT_ID/exprec:latest \
+      gcloud run deploy exprecapp \
+      --image gcr.io/$PROJECT_ID/exprecapp:latest \
       --region YOUR_REGION \
       --platform managed \
       --allow-unauthenticated
 
 images:
-- 'gcr.io/$PROJECT_ID/exprec:latest'
+- 'gcr.io/$PROJECT_ID/exprecapp:latest'
