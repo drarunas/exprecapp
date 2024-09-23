@@ -1,3 +1,6 @@
+options:
+  logging: CLOUD_LOGGING_ONLY  # Logs are only available in Google Cloud Console (Cloud Logging)
+
 steps:
 - name: 'gcr.io/cloud-builders/docker'
   entrypoint: 'bash'
