@@ -27,7 +27,7 @@ steps:
     - |
       gcloud run deploy exprecapp \
       --image gcr.io/$PROJECT_ID/exprecapp:latest \
-      --region YOUR_REGION \
+      --region europe-west4 \
       --platform managed \
       --allow-unauthenticated
 
