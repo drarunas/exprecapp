@@ -59,7 +59,6 @@ def query():
         if not data:
             return jsonify({"error": "Missing query text"}), 400
 
-        # Step 1: Calculate the embedding for the new abstract
         print(" 1 getting embeddings from query")
         new_embedding = get_embeddings(data).tolist()
 
@@ -72,13 +71,46 @@ def query():
 
                 # Step 3: Execute the SQL query using the new embedding
                 print(' 3 Executing sql query calculating distances')
-                sql_query = """
-                    SELECT ev.id, ev.embedding <=> %s::vector AS distance, wt.title
-                    FROM e5_vectors ev
-                    LEFT JOIN w_titles_sn wt ON ev.id = wt.id
-                    ORDER BY distance
-                    LIMIT 100;
-                """
+                # sql_query = """
+                #     SELECT ev.id, ev.embedding <=> %s::vector AS distance, 
+                #         COALESCE(wt.title, etw.title) AS title,
+                #         COALESCE(was.auth_id, wae.auth_id) AS auids
+
+                #     FROM e5_vectors ev
+                #     LEFT JOIN w_titles_sn wt ON ev.id = wt.id
+                #     LEFT JOIN w_titles_els etw ON ev.id = etw.id
+                #     LEFT JOIN w_auth_sn was ON ev.id = was.id
+                #     LEFT JOIN w_auth_els wae ON ev.id = wae.id
+                #     ORDER BY distance
+                #     LIMIT 10;
+                # """
+
+                sql_query='''
+                        WITH top_works AS (
+                            SELECT ev.id, 
+                                ev.embedding <=> %s::vector AS distance, 
+                                COALESCE(wt.title, etw.title) AS title,
+                                COALESCE(was.auth_id, wae.auth_id) AS auids
+                            FROM e5_vectors ev
+                            LEFT JOIN w_titles_sn wt ON ev.id = wt.id
+                            LEFT JOIN w_titles_els etw ON ev.id = etw.id
+                            LEFT JOIN w_auth_sn was ON ev.id = was.id
+                            LEFT JOIN w_auth_els wae ON ev.id = wae.id
+                            ORDER BY distance
+                            LIMIT 100
+                        )
+
+                        SELECT tw.id, 
+                            tw.distance, 
+                            tw.title, 
+                            STRING_AGG(tw.auids, ', ') AS aggregated_auids
+                        FROM top_works tw
+                        GROUP BY tw.id, tw.distance, tw.title
+                        ORDER BY tw.distance;'''
+
+        
+
+
                 cur.execute(sql_query, (new_embedding,))
 
                 results = cur.fetchall()
@@ -86,7 +118,7 @@ def query():
 
                 # Step 4: Convert results to a list of dictionaries for the template
                 results_list = [
-                    {"id": row[0], "distance": row[1], "title": row[2]} 
+                    {"id": row[0], "distance": row[1], "title": row[2], "auid": row[3]} 
                     for row in results
                 ]
 

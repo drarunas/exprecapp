@@ -24,16 +24,23 @@
                 <thead>
                     <tr>
                         <th>ID</th>
+                        <th>Author</th>
                         <th>Title</th>
-                        <th>Distance</th>
+                        <th>Similarity</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for result in results %}
                     <tr>
-                        <td>{{ result.id }}</td>
+                        <td><a href="{{ result.id }}">{{ result.id }}</a></td>
+                        <td>
+                            {% for auid in result.auid.split(', ') %}
+                                <a href="{{ auid }}">{{ auid }}</a>{% if not loop.last %}, {% endif %}
+                            {% endfor %}
+                        </td>
+                        
                         <td>{{ result.title }}</td>
-                        <td>{{ result.distance }}</td>
+                        <td>{{ 1 - result.distance }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
