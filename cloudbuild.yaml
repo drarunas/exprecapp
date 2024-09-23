@@ -6,6 +6,7 @@ steps:
     args:
       - '-c'
       - |
+        echo "...   Starting the installation of dependencies"
         pip install --upgrade pip
         pip install --target=/workspace/packaged -r requirements.txt
     cache:
