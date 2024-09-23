@@ -1,43 +1,13 @@
 steps:
-  # Step 1: Set up the Python environment and install dependencies
-  - name: 'python:3.9'  # Adjust Python version as needed
-    id: 'Install dependencies'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        echo "...   Starting the installation of dependencies"
-        pip install --upgrade pip
-        pip install --target=/workspace/packaged -r requirements.txt
-    cache:
-      key: "requirements-lock-{{ checksum 'requirements.txt' }}"
-      paths:
-        - /workspace/packaged  # Cache installed packages
-  
-  # Step 2: Use Google Cloud Buildpacks to build the app and include dependencies
-  - name: 'gcr.io/buildpacks/builder'
-    args: ['pack', 'build', 'gcr.io/$PROJECT_ID/app']
-    env:
-      - GOOGLE_RUNTIME_VERSION=python39  # Specify the Python version
-    cache:
-      paths:
-        - /workspace/.venv  # Cache the virtual environment if applicable
-
-  # Step 3: Deploy the app to Cloud Run
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: 'gcloud'
-    args:
-      [
-        'run', 'deploy', 'app',
-        '--image=gcr.io/$PROJECT_ID/app',
-        '--platform=managed',
-        '--region=europe-west4',
-        '--allow-unauthenticated',
-      ]
-
-# Define cache timeout for this build
-options:
-  cache: 
-    timeout: '16000s'  # Cache timeout (adjust as needed)
-
-timeout: '1800s'  # Overall build timeout
+- name: 'gcr.io/cloud-builders/docker'
+  entrypoint: 'bash'
+  args: ['-c', 'docker pull gcr.io/$PROJECT_ID/exprec:latest || exit 0']
+- name: 'gcr.io/cloud-builders/docker'
+  args: [
+        'build',
+        '-t', 'gcr.io/$PROJECT_ID/exprec:latest',
+        '--cache-from', 'gcr.io/$PROJECT_ID/exprec:latest',
+        '--build-arg', 'BUILDKIT_INLINE_CACHE=1',
+        '.'
+  ]
+images: ['gcr.io/$PROJECT_ID/exprec:latest']
