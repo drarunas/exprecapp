@@ -2,6 +2,7 @@ steps:
 - name: 'gcr.io/cloud-builders/docker'
   entrypoint: 'bash'
   args: ['-c', 'docker pull gcr.io/$PROJECT_ID/exprec:latest || exit 0']
+
 - name: 'gcr.io/cloud-builders/docker'
   args: [
         'build',
@@ -10,4 +11,22 @@ steps:
         '--build-arg', 'BUILDKIT_INLINE_CACHE=1',
         '.'
   ]
-images: ['gcr.io/$PROJECT_ID/exprec:latest']
+
+- name: 'gcr.io/cloud-builders/docker'
+  args: [
+        'push', 'gcr.io/$PROJECT_ID/exprec:latest'
+  ]
+
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: 'bash'
+  args:
+    - '-c'
+    - |
+      gcloud run deploy exprec \
+      --image gcr.io/$PROJECT_ID/exprec:latest \
+      --region YOUR_REGION \
+      --platform managed \
+      --allow-unauthenticated
+
+images:
+- 'gcr.io/$PROJECT_ID/exprec:latest'
