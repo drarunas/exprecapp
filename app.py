@@ -4,6 +4,7 @@ import torch
 import psycopg2
 from psycopg2 import pool
 import os
+from datetime import datetime
 app = Flask(__name__)
 
 # Load the e5-multilingual-large model using SentenceTransformer
@@ -59,18 +60,18 @@ def query():
         if not data:
             return jsonify({"error": "Missing query text"}), 400
 
-        print(" 1 getting embeddings from query")
+        print(" 1 getting embeddings from query ", datetime.now().strftime("%H:%M:%S"))
         new_embedding = get_embeddings(data).tolist()
 
         try:
             # Step 2: Get a connection from the pool
-            print(" 2 Getting connection from the pool")
+            print(" 2 Getting connection from the pool ", datetime.now().strftime("%H:%M:%S"))
             conn = pg_pool.getconn()
             if conn:
                 cur = conn.cursor()
 
                 # Step 3: Execute the SQL query using the new embedding
-                print(' 3 Executing sql query calculating distances')
+                print(' 3 Executing sql query calculating distances', datetime.now().strftime("%H:%M:%S"))
                 # sql_query = """
                 #     SELECT ev.id, ev.embedding <=> %s::vector AS distance, 
                 #         COALESCE(wt.title, etw.title) AS title,
@@ -86,25 +87,25 @@ def query():
                 # """
 
                 sql_query='''
+                        SET LOCAL hnsw.ef_search = 40;
                         WITH top_works AS (
                             SELECT ev.id, 
                                 ev.embedding <=> %s::vector AS distance, 
-                                COALESCE(wt.title, etw.title) AS title,
-                                COALESCE(was.auth_id, wae.auth_id) AS auids
+                                COALESCE(wt.title, etw.title) AS title
                             FROM e5_vectors ev
                             LEFT JOIN w_titles_sn wt ON ev.id = wt.id
                             LEFT JOIN w_titles_els etw ON ev.id = etw.id
-                            LEFT JOIN w_auth_sn was ON ev.id = was.id
-                            LEFT JOIN w_auth_els wae ON ev.id = wae.id
                             ORDER BY distance
-                            LIMIT 100
+                            LIMIT 20
                         )
 
                         SELECT tw.id, 
                             tw.distance, 
                             tw.title, 
-                            STRING_AGG(tw.auids, ', ') AS aggregated_auids
+                            STRING_AGG(COALESCE(was.auth_id, wae.auth_id), ', ') AS aggregated_auids
                         FROM top_works tw
+                        LEFT JOIN w_auth_sn was ON tw.id = was.id
+                        LEFT JOIN w_auth_els wae ON tw.id = wae.id
                         GROUP BY tw.id, tw.distance, tw.title
                         ORDER BY tw.distance;'''
 
@@ -114,7 +115,7 @@ def query():
                 cur.execute(sql_query, (new_embedding,))
 
                 results = cur.fetchall()
-                print(" 4 ok")
+                print(" 4 ok ", datetime.now().strftime("%H:%M:%S"))
 
                 # Step 4: Convert results to a list of dictionaries for the template
                 results_list = [
