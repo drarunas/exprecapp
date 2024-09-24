@@ -40,7 +40,7 @@ else:
 
 # Function to calculate the embedding for a new abstract using e5-multilingual-large
 def get_embeddings(text):
-    query = "query: " + text  # Prefix the text with "query:"
+    query = "passage: " + text  # Prefix the text with "query:"
     embeddings = model.encode(query, convert_to_numpy=True)
     return embeddings
 
@@ -72,19 +72,29 @@ def query():
 
                 # Step 3: Execute the SQL query using the new embedding
                 print(' 3 Executing sql query calculating distances', datetime.now().strftime("%H:%M:%S"))
-                # sql_query = """
-                #     SELECT ev.id, ev.embedding <=> %s::vector AS distance, 
-                #         COALESCE(wt.title, etw.title) AS title,
-                #         COALESCE(was.auth_id, wae.auth_id) AS auids
 
-                #     FROM e5_vectors ev
-                #     LEFT JOIN w_titles_sn wt ON ev.id = wt.id
-                #     LEFT JOIN w_titles_els etw ON ev.id = etw.id
-                #     LEFT JOIN w_auth_sn was ON ev.id = was.id
-                #     LEFT JOIN w_auth_els wae ON ev.id = wae.id
-                #     ORDER BY distance
-                #     LIMIT 10;
-                # """
+                # sql_query='''
+                #         SET LOCAL hnsw.ef_search = 40;
+                #         WITH top_works AS (
+                #             SELECT ev.id, 
+                #                 ev.embedding <=> %s::vector AS distance, 
+                #                 COALESCE(wt.title, etw.title) AS title
+                #             FROM e5_vectors ev
+                #             LEFT JOIN w_titles_sn wt ON ev.id = wt.id
+                #             LEFT JOIN w_titles_els etw ON ev.id = etw.id
+                #             ORDER BY distance
+                #             LIMIT 10
+                #         )
+
+                #         SELECT tw.id, 
+                #             tw.distance, 
+                #             tw.title, 
+                #             STRING_AGG(COALESCE(was.auth_id, wae.auth_id), ', ') AS aggregated_auids
+                #         FROM top_works tw
+                #         LEFT JOIN w_auth_sn was ON tw.id = was.id
+                #         LEFT JOIN w_auth_els wae ON tw.id = wae.id
+                #         GROUP BY tw.id, tw.distance, tw.title
+                #         ORDER BY tw.distance;'''
 
                 sql_query='''
                         SET LOCAL hnsw.ef_search = 40;
@@ -96,20 +106,23 @@ def query():
                             LEFT JOIN w_titles_sn wt ON ev.id = wt.id
                             LEFT JOIN w_titles_els etw ON ev.id = etw.id
                             ORDER BY distance
-                            LIMIT 20
-                        )
-
+                            LIMIT 10
+                        ),
+                        awd AS (
                         SELECT tw.id, 
                             tw.distance, 
                             tw.title, 
-                            STRING_AGG(COALESCE(was.auth_id, wae.auth_id), ', ') AS aggregated_auids
+                            COALESCE(was.auth_id, wae.auth_id) auid
                         FROM top_works tw
                         LEFT JOIN w_auth_sn was ON tw.id = was.id
                         LEFT JOIN w_auth_els wae ON tw.id = wae.id
-                        GROUP BY tw.id, tw.distance, tw.title
-                        ORDER BY tw.distance;'''
-
-        
+                        )
+                        SELECT awd.id, awd.title, awd.auid, awd.distance, a_names.orcid, a_names.name
+                        FROM awd 
+                        LEFT JOIN a_names ON awd.auid = a_names.id
+                        ORDER BY awd.distance
+                        '''
+                
 
 
                 cur.execute(sql_query, (new_embedding,))
@@ -119,7 +132,7 @@ def query():
 
                 # Step 4: Convert results to a list of dictionaries for the template
                 results_list = [
-                    {"id": row[0], "distance": row[1], "title": row[2], "auid": row[3]} 
+                    {"id": row[0], "title": row[1], "auid": row[2], "distance": row[3], "orcid": row[4], "name": row[5]} 
                     for row in results
                 ]
 
@@ -131,6 +144,6 @@ def query():
 
         except Exception as e:
             return jsonify({"error": str(e)}), 500
-
+    return render_template('query.html', results=[])
 if __name__ == "__main__":
     app.run(debug=True)
