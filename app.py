@@ -101,10 +101,9 @@ def query():
                         WITH top_works AS (
                             SELECT ev.id, 
                                 ev.embedding <=> %s::vector AS distance, 
-                                COALESCE(wt.title, etw.title) AS title
+                                wt.title AS title
                             FROM e5_vectors ev
-                            LEFT JOIN w_titles_sn wt ON ev.id = wt.id
-                            LEFT JOIN w_titles_els etw ON ev.id = etw.id
+                            LEFT JOIN w_titles wt ON ev.id = wt.id
                             ORDER BY distance
                             LIMIT 10
                         ),
@@ -112,10 +111,9 @@ def query():
                         SELECT tw.id, 
                             tw.distance, 
                             tw.title, 
-                            COALESCE(was.auth_id, wae.auth_id) auid
+                            wa.auth_id auid
                         FROM top_works tw
-                        LEFT JOIN w_auth_sn was ON tw.id = was.id
-                        LEFT JOIN w_auth_els wae ON tw.id = wae.id
+                        LEFT JOIN w_auth wa ON tw.id = wa.id
                         )
                         SELECT awd.id, awd.title, awd.auid, awd.distance, a_names.orcid, a_names.name
                         FROM awd 
