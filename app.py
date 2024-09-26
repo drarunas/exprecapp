@@ -55,11 +55,11 @@ def index():
     return render_template('index.html')
 
 # /query route to accept the 'q' parameter and return results
-@app.route('/query', methods=['GET', 'POST'])
+@app.route('/query', methods=['GET'])
 
 # A function to query the database using the connection pool1
 def query():
-    if request.method == 'POST':
+    if request.method == 'GET':
         data = request.form['q']
 
         if not data:
@@ -147,6 +147,6 @@ def query():
 
         except Exception as e:
             return jsonify({"error": str(e)}), 500
-    return render_template('query.html', results=[])
+    return jsonify({"error": str(e)}), 500
 if __name__ == "__main__":
     app.run(debug=True)
