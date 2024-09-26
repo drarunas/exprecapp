@@ -1,4 +1,6 @@
 from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
+
 from sentence_transformers import SentenceTransformer
 import torch
 import psycopg2
@@ -6,6 +8,9 @@ from psycopg2 import pool
 import os
 from datetime import datetime
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "http://127.0.0.1:8080"}})
+
+
 
 # Load the e5-multilingual-large model using SentenceTransformer
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
