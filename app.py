@@ -60,7 +60,7 @@ def index():
 # A function to query the database using the connection pool1
 def query():
     if request.method == 'GET':
-        data = request.form['q']
+        data = request.args.get('q')
 
         if not data:
             return jsonify({"error": "Missing query text"}), 400
