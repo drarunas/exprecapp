@@ -143,7 +143,7 @@ def query():
                 pg_pool.putconn(conn)
 
                 # Step 6: Return the results in HTML format
-                return render_template('query.html', results=results_list)
+                return jsonify(results_list)
 
         except Exception as e:
             return jsonify({"error": str(e)}), 500
