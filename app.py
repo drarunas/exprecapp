@@ -137,68 +137,41 @@ def queryauthors():
 
                 # Step 3: Execute the SQL query using the new embedding
                 print(' 3 Executing sql query calculating distances', datetime.now().strftime("%H:%M:%S"))
-                
                 sql_query='''
-                    SET LOCAL hnsw.ef_search = 20;
-
-                    WITH work_distances AS (
-                        SELECT awd.auid, 
-                            awd.work_id, 
-                            MIN(awd.distance) AS distance, 
-                            wt.title
-                        FROM (
-                            SELECT ev.id, ev.embedding <=> %s::vector AS distance
-                            FROM e5_vectors ev
-                            ORDER BY distance
-                            LIMIT 20
-                        ) AS top_works
-                        JOIN w_auth wa ON top_works.id = wa.id
-                        JOIN LATERAL (
-                            SELECT wa.auth_id AS auid, ev.id AS work_id, ev.embedding <=> %s::vector AS distance
-                            FROM e5_vectors ev
-                            JOIN w_auth wa2 ON ev.id = wa2.id
-                            WHERE wa.auth_id = wa2.auth_id
-                            ORDER BY ev.embedding <=> %s::vector
-                            LIMIT 3
-                        ) AS awd ON awd.auid = wa.auth_id
-                        JOIN w_titles wt ON awd.work_id = wt.id
-                        GROUP BY awd.auid, awd.work_id, wt.title
-                    )
-                    SELECT auid, work_id, distance,
-                        AVG(distance) OVER (PARTITION BY auid) AS avg_distance_per_auid
-                    FROM work_distances
-                    ORDER BY avg_distance_per_auid, distance
+                    SET LOCAL hnsw.ef_search = 40;
+                    SELECT ap.auth_id, an.name, ap.embedding <=> %s::vector AS distance
+                    FROM author_profiles ap
+                    LEFT JOIN a_names an ON ap.auth_id = an.id
+                    ORDER BY distance
+                    LIMIT 100
                     '''
 
-                cur.execute(sql_query, (new_embedding,new_embedding,new_embedding,))
-                # List of tuples
+                cur.execute(sql_query, (new_embedding,))
                 results = cur.fetchall()
                 print(" 4 ok ", datetime.now().strftime("%H:%M:%S"))
-                # Return the connection to the pool
                 pg_pool.putconn(conn)
 
+                results_list = [
+                    {"auth_id": row[0], "name": row[1], "distance": row[2]} 
+                    for row in results
+                ]
+               
+
+                return jsonify(results_list)
                 # Convert list of tuples to DataFrame
-                df = pd.DataFrame(results, columns=['author', 'work', 'work_dist', 'avg_dist'])
-                grouped_data = (
-                    df.groupby(['author', 'avg_dist'])
-                    .apply(lambda x: x[['work', 'work_dist']].to_dict(orient='records'))
-                    .reset_index(name='works')
-                    .sort_values(by='avg_dist', ascending=True) 
-                ).to_dict(orient='records')
-                # Serialize your sorted_results
-                return jsonify(grouped_data)
+                # df = pd.DataFrame(results, columns=['author', 'work', 'work_dist', 'avg_dist'])
+                # grouped_data = (
+                #     df.groupby(['author', 'avg_dist'])
+                #     .apply(lambda x: x[['work', 'work_dist']].to_dict(orient='records'))
+                #     .reset_index(name='works')
+                #     .sort_values(by='avg_dist', ascending=True) 
+                # ).to_dict(orient='records')
+                # # Serialize your sorted_results
+                # return jsonify(grouped_data)
 
         except Exception as e:
             return jsonify({"error": str(e)}), 500
     return jsonify({"error": str(e)}), 500
-
-
-
-
-
-
-
-
 
 
 # /query route to accept the 'q' parameter and return results
