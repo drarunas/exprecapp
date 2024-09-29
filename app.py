@@ -116,11 +116,17 @@ def query():
             return jsonify({"error": str(e)}), 500
     return jsonify({"error": str(e)}), 500
 
+
+
+
 @app.route('/queryauthors', methods=['GET'])
 # A function to query the database using the connection pool1
 def queryauthors():
     if request.method == 'GET':
         data = request.args.get('q')
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))  # Default limit
+        offset = (page - 1) * limit
 
         if not data:
             return jsonify({"error": "Missing query text"}), 400
@@ -139,39 +145,94 @@ def queryauthors():
                 print(' 3 Executing sql query calculating distances', datetime.now().strftime("%H:%M:%S"))
                 sql_query='''
                     SET LOCAL hnsw.ef_search = 40;
-                    SELECT ap.auth_id, an.name, ap.embedding <=> %s::vector AS distance
+                    WITH
+                    AUS AS (
+                    SELECT ap.auth_id, an.name, ap.embedding <=> %s::vector AS distance,
+                    ast.works_count, ast.h_index
                     FROM author_profiles ap
                     LEFT JOIN a_names an ON ap.auth_id = an.id
+                    LEFT JOIN a_stats ast ON ap.auth_id = ast.id
                     ORDER BY distance
-                    LIMIT 100
+                    LIMIT %s OFFSET %s
+                    ),
+                    AFFS AS 
+                    (
+                    SELECT AUS.auth_id, af.aff_name, af.year
+                    FROM AUS
+                    LEFT JOIN a_aff af ON AUS.auth_id = af.id
+                    ),
+                    AGGAFFS AS
+                    (
+                    SELECT auth_id,  ARRAY_AGG(aff_name) as aff_names, ARRAY_AGG(year) as aff_years
+                    FROM AFFS
+                    GROUP BY auth_id
+                    ),
+                    TOPS AS 
+                    (
+                    SELECT AUS.auth_id, atop.topic_name, atop.topic_count
+                    FROM AUS
+                    LEFT JOIN a_topics atop ON AUS.auth_id = atop.id
+                    ),
+                    AGGTOPS AS
+                    (
+                    SELECT auth_id, ARRAY_AGG(topic_name) as topic_names, ARRAY_AGG(topic_count) as topic_counts
+                    FROM TOPS
+                    GROUP BY auth_id
+                    )
+                    SELECT AUS.auth_id, name, distance, works_count, h_index, aff_names, aff_years, topic_names, topic_counts
+                    FROM AUS
+                    LEFT JOIN AGGAFFS ON AUS.auth_id = AGGAFFS.auth_id
+                    LEFT JOIN AGGTOPS ON AUS.auth_id = AGGTOPS.auth_id
+                    ORDER BY distance
+
                     '''
 
-                cur.execute(sql_query, (new_embedding,))
+
+                cur.execute(sql_query, (new_embedding, limit, offset))
                 results = cur.fetchall()
                 print(" 4 ok ", datetime.now().strftime("%H:%M:%S"))
                 pg_pool.putconn(conn)
 
-                results_list = [
-                    {"auth_id": row[0], "name": row[1], "distance": row[2]} 
-                    for row in results
-                ]
+               
+                results_list = []
+                for row in results:
+                    # Zip the affiliations with their years
+                    affs_with_years = list(zip(row[5], row[6]))  # row[5] = affs, row[6] = aff_years
+                    topics_with_counts = list(zip(row[7], row[8]))
+                    
+                    # Find the latest year
+                    latest_year = max(row[6])
+                    
+                    # Filter affiliations that correspond to the latest year
+                    latest_affs = [aff for aff, year in affs_with_years if year == latest_year]
+
+                    results_list.append({
+                        "auth_id": row[0],
+                        "name": row[1],
+                        "distance": row[2],
+                        "works_count": row[3],
+                        "h_index": row[4],
+                        "affs": latest_affs,  # Only affiliations from the latest year
+                        "aff_years": [latest_year],  # The latest year
+                        "topics": topics_with_counts[:5]
+                    })
+
+
                
 
                 return jsonify(results_list)
-                # Convert list of tuples to DataFrame
-                # df = pd.DataFrame(results, columns=['author', 'work', 'work_dist', 'avg_dist'])
-                # grouped_data = (
-                #     df.groupby(['author', 'avg_dist'])
-                #     .apply(lambda x: x[['work', 'work_dist']].to_dict(orient='records'))
-                #     .reset_index(name='works')
-                #     .sort_values(by='avg_dist', ascending=True) 
-                # ).to_dict(orient='records')
-                # # Serialize your sorted_results
-                # return jsonify(grouped_data)
+                
 
         except Exception as e:
             return jsonify({"error": str(e)}), 500
     return jsonify({"error": str(e)}), 500
+
+
+
+
+
+
+
 
 
 # /query route to accept the 'q' parameter and return results
@@ -295,7 +356,6 @@ def querytopics():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
     return jsonify({"error": str(e)}), 500
-
 
 if __name__ == "__main__":
     app.run(debug=True)
