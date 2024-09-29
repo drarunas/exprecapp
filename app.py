@@ -144,7 +144,7 @@ def queryauthors():
                 # Step 3: Execute the SQL query using the new embedding
                 print(' 3 Executing sql query calculating distances', datetime.now().strftime("%H:%M:%S"))
                 sql_query='''
-                    SET LOCAL hnsw.ef_search = 40;
+                    SET LOCAL hnsw.ef_search = 80;
                     WITH
                     AUS AS (
                     SELECT ap.auth_id, an.name, ap.embedding <=> %s::vector AS distance,
@@ -199,6 +199,8 @@ def queryauthors():
                     # Zip the affiliations with their years
                     affs_with_years = list(zip(row[5], row[6]))  # row[5] = affs, row[6] = aff_years
                     topics_with_counts = list(zip(row[7], row[8]))
+                    sorted_topics_with_counts = sorted(topics_with_counts, key=lambda x: x[1], reverse=True)
+
                     
                     # Find the latest year
                     latest_year = max(row[6])
@@ -214,7 +216,7 @@ def queryauthors():
                         "h_index": row[4],
                         "affs": latest_affs,  # Only affiliations from the latest year
                         "aff_years": [latest_year],  # The latest year
-                        "topics": topics_with_counts[:5]
+                        "topics": sorted_topics_with_counts[:5]
                     })
 
 
@@ -326,7 +328,7 @@ def querytopics():
                 cur = conn.cursor()
                 print(' 3 Executing sql query calculating distances', datetime.now().strftime("%H:%M:%S"))
                 sql_query='''
-                        SET LOCAL hnsw.ef_search = 20;
+                        SET LOCAL hnsw.ef_search = 40;
                         SELECT 
                             top.topic_id_c, 
                             top.topic_name,
