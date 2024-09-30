@@ -8,7 +8,7 @@ import os
 from datetime import datetime
 import pandas as pd
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": ["http://127.0.0.1:8080", "https://exrecapp.web.app"]}})
+CORS(app, resources={r"/*": {"origins": ["http://127.0.0.1:8080", "https://exrecapp.web.app", "https://indigoquay.com"]}})
 
 # Load the e5-multilingual-large model using SentenceTransformer
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
