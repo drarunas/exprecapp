@@ -123,6 +123,8 @@ def queryauthors():
         data = request.args.get('q')
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))  # Default limit
+        with_emails_only = request.args.get('with_emails_only', 'false').lower() == 'true'
+
         offset = (page - 1) * limit
 
         if not data:
@@ -141,7 +143,7 @@ def queryauthors():
                 # Step 3: Execute the SQL query using the new embedding
                 print(' 3 Executing sql query calculating distances', datetime.now().strftime("%H:%M:%S"))
                 sql_query='''
-                    SET LOCAL hnsw.ef_search = 80;
+                    SET LOCAL hnsw.ef_search = 200;
                     WITH
                     AUS AS (
                     SELECT ap.auth_id, an.name, ap.embedding <=> %s::vector AS distance,
@@ -149,6 +151,8 @@ def queryauthors():
                     FROM author_profiles ap
                     LEFT JOIN a_names an ON ap.auth_id = an.id
                     LEFT JOIN a_stats ast ON ap.auth_id = ast.id
+                    LEFT JOIN a_emails_agg ae ON ap.auth_id = ae.auth_id
+                    WHERE (%s = false OR ae.emails IS NOT NULL)
                     ORDER BY distance
                     LIMIT %s OFFSET %s
                     ),
@@ -189,11 +193,9 @@ def queryauthors():
                     LEFT JOIN AGGTOPS ON AUS.auth_id = AGGTOPS.auth_id
                     LEFT JOIN EMAILS ON AUS.auth_id = EMAILS.auth_id
                     ORDER BY distance
-
                     '''
 
-
-                cur.execute(sql_query, (new_embedding, limit, offset))
+                cur.execute(sql_query, (new_embedding, with_emails_only, limit, offset))
                 results = cur.fetchall()
                 print(" 4 ok ", datetime.now().strftime("%H:%M:%S"))
                 
