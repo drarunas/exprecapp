@@ -124,6 +124,7 @@ def queryauthors():
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))  # Default limit
         with_emails_only = request.args.get('with_emails_only', 'false').lower() == 'true'
+        min_h_index = int(request.args.get('minh', 0))
 
         offset = (page - 1) * limit
 
@@ -152,7 +153,8 @@ def queryauthors():
                     LEFT JOIN a_names an ON ap.auth_id = an.id
                     LEFT JOIN a_stats ast ON ap.auth_id = ast.id
                     LEFT JOIN a_emails_agg ae ON ap.auth_id = ae.auth_id
-                    WHERE (%s = false OR ae.emails IS NOT NULL)
+                    WHERE ((%s = false OR ae.emails IS NOT NULL)
+                            AND ast.h_index > %s)
                     ORDER BY distance
                     LIMIT %s OFFSET %s
                     ),
@@ -195,7 +197,7 @@ def queryauthors():
                     ORDER BY distance
                     '''
 
-                cur.execute(sql_query, (new_embedding, with_emails_only, limit, offset))
+                cur.execute(sql_query, (new_embedding, with_emails_only, min_h_index, limit, offset))
                 results = cur.fetchall()
                 print(" 4 ok ", datetime.now().strftime("%H:%M:%S"))
                 
