@@ -235,7 +235,9 @@ def queryauthors():
                 
 
         except Exception as e:
+            print(str(e))
             return jsonify({"error": str(e)}), 500
+    print(str(e))
     return jsonify({"error": str(e)}), 500
 
 
