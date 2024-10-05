@@ -8,7 +8,7 @@ import os
 from datetime import datetime
 import pandas as pd
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": ["http://127.0.0.1:8080", "https://exrecapp.web.app", "https://indigoquay.com"]}})
+CORS(app, resources={r"/*": {"origins": ["http://127.0.0.1:8080", "https://exrecapp.web.app", "https://exprlabs.com"]}})
 
 # Load the e5-multilingual-large model using SentenceTransformer
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -116,9 +116,6 @@ def query():
             return jsonify({"error": str(e)}), 500
     return jsonify({"error": str(e)}), 500
 
-
-
-
 @app.route('/queryauthors', methods=['GET'])
 # A function to query the database using the connection pool1
 def queryauthors():
@@ -155,6 +152,13 @@ def queryauthors():
                     ORDER BY distance
                     LIMIT %s OFFSET %s
                     ),
+                    EMAILS AS
+                    (
+                    SELECT AUS.auth_id, ARRAY_AGG(AE.email) as emails
+                    FROM AUS
+                    LEFT JOIN a_emails AE ON AUS.auth_id = AE.AUTH_ID
+                    GROUP BY AUS.auth_id
+                    ),
                     AFFS AS 
                     (
                     SELECT AUS.auth_id, af.aff_name, af.year
@@ -179,10 +183,11 @@ def queryauthors():
                     FROM TOPS
                     GROUP BY auth_id
                     )
-                    SELECT AUS.auth_id, name, distance, works_count, h_index, aff_names, aff_years, topic_names, topic_counts
+                    SELECT AUS.auth_id, name, distance, works_count, h_index, aff_names, aff_years, topic_names, topic_counts, EMAILS.emails
                     FROM AUS
                     LEFT JOIN AGGAFFS ON AUS.auth_id = AGGAFFS.auth_id
                     LEFT JOIN AGGTOPS ON AUS.auth_id = AGGTOPS.auth_id
+                    LEFT JOIN EMAILS ON AUS.auth_id = EMAILS.auth_id
                     ORDER BY distance
 
                     '''
@@ -191,11 +196,14 @@ def queryauthors():
                 cur.execute(sql_query, (new_embedding, limit, offset))
                 results = cur.fetchall()
                 print(" 4 ok ", datetime.now().strftime("%H:%M:%S"))
+                
+                
                 pg_pool.putconn(conn)
 
                
                 results_list = []
                 for row in results:
+                    
                     # Zip the affiliations with their years
                     affs_with_years = list(zip(row[5], row[6]))  # row[5] = affs, row[6] = aff_years
                     topics_with_counts = list(zip(row[7], row[8]))
@@ -216,7 +224,8 @@ def queryauthors():
                         "h_index": row[4],
                         "affs": latest_affs,  # Only affiliations from the latest year
                         "aff_years": [latest_year],  # The latest year
-                        "topics": sorted_topics_with_counts[:5]
+                        "topics": sorted_topics_with_counts[:5],
+                        "emails": row[9]
                     })
 
 
