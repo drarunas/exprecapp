@@ -127,7 +127,7 @@ def queryauthors():
         min_h_index = int(request.args.get('minh', 0))
         check_for_cois = request.args.get('coi-check', 'false').lower() == 'true'
         authors = request.args.get('authors', [])
-        if len(authors.strip())<2:
+        if len(authors)<2:
             check_for_cois = False
         authors = [author.strip() for author in request.args.get('authors', '').split(',')]
         print(check_for_cois)
@@ -152,7 +152,7 @@ def queryauthors():
                 # Step 3: Execute the SQL query using the new embedding
                 print(' 3 Executing sql query calculating distances', datetime.now().strftime("%H:%M:%S"))
                 sql_query='''
-                    SET LOCAL hnsw.ef_search = 1000;
+                    SET LOCAL hnsw.ef_search = 200;
                     WITH
                     AUS AS (
                     SELECT ap.auth_id, an.name, ap.embedding <=> %s::vector AS distance,
