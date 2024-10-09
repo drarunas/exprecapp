@@ -237,7 +237,8 @@ def queryauthors():
                         "affs": latest_affs,  # Only affiliations from the latest year
                         "aff_years": [latest_year],  # The latest year
                         "topics": sorted_topics_with_counts[:5],
-                        "emails": row[9]
+                        "emails": row[9],
+                        "conflicts": 0
                     }
 
                     if check_for_cois:
