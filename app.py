@@ -125,6 +125,14 @@ def queryauthors():
         limit = int(request.args.get('limit', 10))  # Default limit
         with_emails_only = request.args.get('with_emails_only', 'false').lower() == 'true'
         min_h_index = int(request.args.get('minh', 0))
+        check_for_cois = request.args.get('coi-check', 'false').lower() == 'true'
+        authors = request.args.get('authors', [])
+        if len(authors.strip())<2:
+            check_for_cois = False
+        authors = [author.strip() for author in request.args.get('authors', '').split(',')]
+        print(check_for_cois)
+        print(authors)
+
 
         offset = (page - 1) * limit
 
@@ -144,7 +152,7 @@ def queryauthors():
                 # Step 3: Execute the SQL query using the new embedding
                 print(' 3 Executing sql query calculating distances', datetime.now().strftime("%H:%M:%S"))
                 sql_query='''
-                    SET LOCAL hnsw.ef_search = 200;
+                    SET LOCAL hnsw.ef_search = 1000;
                     WITH
                     AUS AS (
                     SELECT ap.auth_id, an.name, ap.embedding <=> %s::vector AS distance,
@@ -220,7 +228,7 @@ def queryauthors():
                     # Filter affiliations that correspond to the latest year
                     latest_affs = [aff for aff, year in affs_with_years if year == latest_year]
 
-                    results_list.append({
+                    result= {
                         "auth_id": row[0],
                         "name": row[1],
                         "distance": row[2],
@@ -230,8 +238,13 @@ def queryauthors():
                         "aff_years": [latest_year],  # The latest year
                         "topics": sorted_topics_with_counts[:5],
                         "emails": row[9]
-                    })
+                    }
 
+                    if check_for_cois:
+                        conflicts = check_for_coi_coauthors(row[0], authors)
+                        result["cois"]=conflicts
+                    results_list.append(result)
+                        
 
                
 
@@ -245,6 +258,60 @@ def queryauthors():
     return jsonify({"error": str(e)}), 500
 
 
+
+@app.route('/coi-coauthors', methods=['GET'])
+def coi_coauthors():
+    # Get expert id and list of author ids from request arguments
+    expert_id = request.args.get('expert')
+    authors_param = request.args.get('authors')  # Comma-separated string
+    
+    # Split authors into a list
+    authors = authors_param.split(',') if authors_param else []    
+    # Check if both expert and authors are provided
+    if not expert_id or not authors:
+        return jsonify({'error': 'Expert and a list of authors are required'}), 400
+    
+    # Query to get the co-authored works between expert and each author
+    query = """
+    SELECT w1.id, wt.title, w2.auth_id as coauthor_id, an.name as coauthor_name
+    FROM w_auth w1
+    JOIN w_auth w2 ON w1.id = w2.id
+    LEFT JOIN w_titles wt ON w1.id = wt.id
+    LEFT JOIN a_names an ON w2.auth_id = an.id
+    WHERE w1.auth_id = %s
+      AND w2.auth_id = %s;
+    """
+    
+    coauthorships = []
+
+    # Connect to the database and execute the query for each author
+    conn = pg_pool.getconn()
+    if conn:
+        try:
+            cur = conn.cursor()
+            
+            for author_id in authors:
+                print(author_id)
+                cur.execute(query, (expert_id, author_id))
+                results = cur.fetchall()
+                
+                # Add the coauthored work results to the list
+                for row in results:
+                    coauthorships.append({
+                        'work_id': row[0],
+                        'title': row[1],
+                        'coauthor_id': row[2],
+                        'coauthor_name': row[3]
+                    })
+        finally:
+            pg_pool.putconn(conn)
+
+    # If no co-authorships found, return a message
+    if not coauthorships:
+        return jsonify({'message': 'No co-authored works found'}), 404
+
+    # Return the list of co-authored works with the expert and authors
+    return jsonify({'coauthorships': coauthorships}), 200
 
 
 
@@ -373,6 +440,53 @@ def querytopics():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
     return jsonify({"error": str(e)}), 500
+
+
+
+
+
+def check_for_coi_coauthors(expert, authors):
+    expert_id = expert
+    # Query to get the co-authored works between expert and each author
+    query = """
+    SELECT w1.id, wt.title, w2.auth_id as coauthor_id, an.name as coauthor_name
+    FROM w_auth w1
+    JOIN w_auth w2 ON w1.id = w2.id
+    LEFT JOIN w_titles wt ON w1.id = wt.id
+    LEFT JOIN a_names an ON w2.auth_id = an.id
+    WHERE w1.auth_id = %s
+      AND w2.auth_id = %s;
+    """
+    
+    coauthorships = []
+
+    # Connect to the database and execute the query for each author
+    conn = pg_pool.getconn()
+    if conn:
+        try:
+            cur = conn.cursor()
+            
+            for author_id in authors:
+                cur.execute(query, (expert_id, author_id))
+                results = cur.fetchall()
+                
+                # Add the coauthored work results to the list
+                for row in results:
+                    coauthorships.append({
+                        'work_id': row[0],
+                        'title': row[1],
+                        'coauthor_id': row[2],
+                        'coauthor_name': row[3]
+                    })
+        finally:
+            pg_pool.putconn(conn)
+
+    if not coauthorships:
+        return 0
+
+    return [expert_id, coauthorships]
+
+
 
 if __name__ == "__main__":
     app.run(debug=True)
