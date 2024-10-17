@@ -177,7 +177,7 @@ def queryauthors():
                     (
                     SELECT AUS.auth_id, af.aff_name, af.year
                     FROM AUS
-                    LEFT JOIN a_aff af ON AUS.auth_id = af.id
+                    LEFT JOIN a_aff_history af ON AUS.auth_id = af.id
                     ),
                     AGGAFFS AS
                     (
@@ -189,7 +189,8 @@ def queryauthors():
                     (
                     SELECT AUS.auth_id, atop.topic_name, atop.topic_count
                     FROM AUS
-                    LEFT JOIN a_topics atop ON AUS.auth_id = atop.id
+                    --LEFT JOIN a_topics atop ON AUS.auth_id = atop.id
+                    LEFT JOIN a_recent_topics atop ON AUS.auth_id = atop.author_id
                     ),
                     AGGTOPS AS
                     (
@@ -313,9 +314,6 @@ def coi_coauthors():
 
     # Return the list of co-authored works with the expert and authors
     return jsonify({'coauthorships': coauthorships}), 200
-
-
-
 
 
 
