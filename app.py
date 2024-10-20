@@ -7,6 +7,7 @@ from psycopg2 import pool
 import os
 from datetime import datetime
 import pandas as pd
+import ast
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": ["http://127.0.0.1:8080", "https://exrecapp.web.app", "https://exprlabs.com"]}})
 
@@ -40,6 +41,7 @@ else:
 
 # Function to calculate the embedding for a new abstract using e5-multilingual-large
 def get_embeddings(text):
+    # query = "query: " + text  # Prefix the text with "query:"
     query = "query: " + text  # Prefix the text with "query:"
     embeddings = model.encode(query, convert_to_numpy=True)
     return embeddings
@@ -177,7 +179,7 @@ def queryauthors():
                     (
                     SELECT AUS.auth_id, af.aff_name, af.year
                     FROM AUS
-                    LEFT JOIN a_aff_history af ON AUS.auth_id = af.id
+                    INNER JOIN a_aff_history af ON AUS.auth_id = af.id
                     ),
                     AGGAFFS AS
                     (
@@ -200,7 +202,7 @@ def queryauthors():
                     )
                     SELECT AUS.auth_id, name, distance, works_count, h_index, aff_names, aff_years, topic_names, topic_counts, EMAILS.emails
                     FROM AUS
-                    LEFT JOIN AGGAFFS ON AUS.auth_id = AGGAFFS.auth_id
+                    INNER JOIN AGGAFFS ON AUS.auth_id = AGGAFFS.auth_id
                     LEFT JOIN AGGTOPS ON AUS.auth_id = AGGTOPS.auth_id
                     LEFT JOIN EMAILS ON AUS.auth_id = EMAILS.auth_id
                     ORDER BY distance
@@ -259,6 +261,74 @@ def queryauthors():
     print(str(e))
     return jsonify({"error": str(e)}), 500
 
+@app.route('/match_works', methods=['GET'])
+def match_works():
+    if request.method == 'GET':
+        author_id = request.args.get('author_id')
+        abstract = request.args.get('abstract')
+
+        if not author_id or not abstract:
+            return jsonify({"error": "Missing author_id or abstract"}), 400
+
+        try:
+            # Step 1: Get the embedding for the abstract
+            print("Calculating embedding for abstract...", datetime.now().strftime("%H:%M:%S"))
+            embedding = get_embeddings(abstract).tolist()
+
+            # Step 2: Get a connection from the pool
+            print("Getting connection from the pool...", datetime.now().strftime("%H:%M:%S"))
+            conn = pg_pool.getconn()
+            if conn:
+                cur = conn.cursor()
+
+                # Step 3: Execute the SQL query to find 3 closest works based on the embedding
+                print('Executing SQL query to find closest works...', datetime.now().strftime("%H:%M:%S"))
+                sql_query = '''
+                    SET LOCAL hnsw.ef_search = 200;
+                    WITH FILTERED_WORKS AS (
+                        SELECT ev.id, ev.embedding
+                        FROM e5_vectors ev
+                        INNER JOIN w_auth wa ON ev.id = wa.id
+                        WHERE wa.auth_id = %s
+                    ),
+                    UNIQUEWORKS AS (
+                    SELECT MIN(fw.id) AS w_id, MIN(fw.embedding <=> %s::vector) AS distance
+                    FROM FILTERED_WORKS fw
+                    INNER JOIN w_auth wa ON fw.id = wa.id
+                    GROUP BY wa.id
+                    ORDER BY distance
+                    LIMIT 3
+                    )
+                    SELECT w_id, distance, wt.title, COALESCE(was.doi, wae.doi) as doi
+                    FROM UNIQUEWORKS uw
+                    LEFT JOIN w_titles wt ON uw.w_id = wt.id
+                    LEFT JOIN w_abs_sn was ON uw.w_id = was.id
+                    LEFT JOIN w_abs_els wae ON uw.w_id = wae.id
+
+                '''
+
+                cur.execute(sql_query, (author_id, embedding,))
+                results = cur.fetchall()
+                print('OK', datetime.now().strftime("%H:%M:%S"))
+
+                # Step 4: Return the results
+                pg_pool.putconn(conn)
+                
+                results_list = []
+                for row in results:
+                    result = {
+                        "work_id": row[0],
+                        "distance": row[1],
+                        "title": row[2],
+                        "doi": row[3]
+                    }
+                    results_list.append(result)
+
+                return jsonify(results_list)
+
+        except Exception as e:
+            print(str(e))
+            return jsonify({"error": str(e)}), 500
 
 
 @app.route('/coi-coauthors', methods=['GET'])
@@ -346,9 +416,15 @@ def queryresearch():
                         WITH top_works AS (
                             SELECT ev.id, 
                                 ev.embedding <=> %s::vector AS distance, 
-                                wt.title AS title
+                                wt.title AS title,
+                                COALESCE(was.inv_abstract, wae.inv_abstract) AS abs
+                                
                             FROM e5_vectors ev
                             LEFT JOIN w_titles wt ON ev.id = wt.id
+                            LEFT JOIN w_abs_sn was ON ev.id = was.id
+                            LEFT JOIN w_abs_els wae  ON ev.id = wae.id
+                            
+                            WHERE LENGTH(COALESCE(was.inv_abstract, wae.inv_abstract)) > 50
                             ORDER BY distance
                             LIMIT 20
                         ),
@@ -356,31 +432,37 @@ def queryresearch():
                         SELECT tw.id, 
                             tw.distance, 
                             tw.title, 
-                            wa.auth_id auid
+                            wa.auth_id auid,
+                            tw.abs abs
                         FROM top_works tw
                         LEFT JOIN w_auth wa ON tw.id = wa.id
                         )
-                        SELECT awd.id, awd.title, array_agg(awd.auid) as auid_array, awd.distance, array_agg(a_names.orcid) AS orcid_array, array_agg(a_names.name) AS name_array
+                        SELECT awd.id, awd.title, array_agg(awd.auid) as auid_array, awd.distance, array_agg(a_names.orcid) AS orcid_array, array_agg(a_names.name) AS name_array, awd.abs as abs
                         FROM awd 
                         LEFT JOIN a_names ON awd.auid = a_names.id
-                        GROUP BY awd.id, awd.title, awd.distance
+                        GROUP BY awd.id, awd.title, awd.distance, awd.abs
                         ORDER BY awd.distance
                         '''
-                
-                cur.execute(sql_query, (new_embedding,))
+                try:
+                    cur.execute(sql_query, (new_embedding,))
 
-                results = cur.fetchall()
-                print(" 4 ok ", datetime.now().strftime("%H:%M:%S"))
+                    results = cur.fetchall()
+                    
+                    print(" 4 ok ", datetime.now().strftime("%H:%M:%S"))
+                  
 
-                results_list = [
-                    {"id": row[0], "title": row[1], "auid": row[2], "distance": row[3], "orcid": row[4], "name": row[5]} 
-                    for row in results
-                ]
-               
-                # Step 5: Release the connection back to the pool
-                pg_pool.putconn(conn)
+                    results_list = [
+                        {"id": row[0], "title": row[1], "auid": row[2], "distance": row[3], "orcid": row[4], "name": row[5],"abstract": convert_inverted(ast.literal_eval(row[6]))} 
+                        for row in results
+                    ]
+                    
+                    # Step 5: Release the connection back to the pool
+                    pg_pool.putconn(conn)
 
-                return jsonify(results_list)
+                    return jsonify(results_list)
+                except Exception as e:
+                    print(e)
+                    return jsonify({"error": str(e)}), 500
 
         except Exception as e:
             return jsonify({"error": str(e)}), 500
@@ -442,7 +524,20 @@ def querytopics():
 
 
 
-
+def convert_inverted(inverted_abstract):
+    # Find the maximum index to determine the size of the output list
+    max_index = max(max(indices) for indices in inverted_abstract.values())
+    
+    # Create an empty list of the size of the maximum index + 1 (for zero-based index)
+    abstract_list = [''] * (max_index + 1)
+    
+    # Iterate through the dictionary and place the words at their respective positions
+    for word, positions in inverted_abstract.items():
+        for position in positions:
+            abstract_list[position] = word
+    
+    # Join the list to form the regular abstract, separating words by a space
+    return ' '.join(abstract_list)
 
 def check_for_coi_coauthors(expert, authors):
     expert_id = expert
