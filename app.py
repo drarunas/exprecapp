@@ -133,8 +133,7 @@ def queryauthors():
         if len(authors)<2:
             check_for_cois = False
         authors = [author.strip() for author in request.args.get('authors', '').split(',')]
-        print(check_for_cois)
-        print(authors)
+        
 
 
         offset = (page - 1) * limit
@@ -266,13 +265,15 @@ def queryauthors():
     print(str(e))
     return jsonify({"error": str(e)}), 500
 
-@app.route('/match_works', methods=['GET'])
+@app.route('/match_works', methods=['POST'])
 def match_works():
-    if request.method == 'GET':
-        author_id = request.args.get('author_id')
+    if request.method == 'POST':
+        data = request.json
+        author_id = data.get('author_id')
+        vector = data.get('vector')
         
-        vector = request.args.get('vector')
-        embedding = json.loads(vector)
+        # embedding = json.loads(vector)
+        embedding = vector
 
         if not author_id or not vector:
             return jsonify({"error": "Missing author_id or abstract"}), 400
