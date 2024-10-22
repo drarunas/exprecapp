@@ -8,6 +8,7 @@ import os
 from datetime import datetime
 import pandas as pd
 import ast
+import json
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": ["http://127.0.0.1:8080", "https://exrecapp.web.app", "https://exprlabs.com"]}})
 
@@ -248,11 +249,15 @@ def queryauthors():
                         conflicts = check_for_coi_coauthors(row[0], authors)
                         result["cois"]=conflicts
                     results_list.append(result)
+
+                    
                         
 
                
 
-                return jsonify(results_list)
+                #return jsonify(results_list)
+                return jsonify({"results": results_list, "vector": new_embedding})
+
                 
 
         except Exception as e:
@@ -265,15 +270,17 @@ def queryauthors():
 def match_works():
     if request.method == 'GET':
         author_id = request.args.get('author_id')
-        abstract = request.args.get('abstract')
+        
+        vector = request.args.get('vector')
+        embedding = json.loads(vector)
 
-        if not author_id or not abstract:
+        if not author_id or not vector:
             return jsonify({"error": "Missing author_id or abstract"}), 400
 
         try:
-            # Step 1: Get the embedding for the abstract
-            print("Calculating embedding for abstract...", datetime.now().strftime("%H:%M:%S"))
-            embedding = get_embeddings(abstract).tolist()
+            # # Step 1: Get the embedding for the abstract
+            # print("Calculating embedding for abstract...", datetime.now().strftime("%H:%M:%S"))
+            # embedding = get_embeddings(abstract).tolist()
 
             # Step 2: Get a connection from the pool
             print("Getting connection from the pool...", datetime.now().strftime("%H:%M:%S"))
