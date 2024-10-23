@@ -9,8 +9,12 @@ from datetime import datetime
 import pandas as pd
 import ast
 import json
+import google.generativeai as ai
+
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": ["http://127.0.0.1:8080", "https://exrecapp.web.app", "https://exprlabs.com"]}})
+
+ai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
 # Load the e5-multilingual-large model using SentenceTransformer
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -21,7 +25,7 @@ if os.getenv('ENV') == 'production':
     # GCP Production using Unix socket
     pg_pool = psycopg2.pool.SimpleConnectionPool(
         minconn=1,
-        maxconn=10,
+        maxconn=100,
         dbname='postgres',
         user='exrec',
         password='wollstonecraft',
@@ -393,10 +397,6 @@ def coi_coauthors():
     # Return the list of co-authored works with the expert and authors
     return jsonify({'coauthorships': coauthorships}), 200
 
-
-
-
-# /query route to accept the 'q' parameter and return results
 @app.route('/queryresearch', methods=['GET'])
 # A function to query the database using the connection pool1
 def queryresearch():
@@ -425,7 +425,9 @@ def queryresearch():
                             SELECT ev.id, 
                                 ev.embedding <=> %s::vector AS distance, 
                                 wt.title AS title,
-                                COALESCE(was.inv_abstract, wae.inv_abstract) AS abs
+                                COALESCE(was.inv_abstract, wae.inv_abstract) AS abs,
+                                COALESCE(was.doi, wae.doi) AS doi
+
                                 
                             FROM e5_vectors ev
                             LEFT JOIN w_titles wt ON ev.id = wt.id
@@ -441,14 +443,15 @@ def queryresearch():
                             tw.distance, 
                             tw.title, 
                             wa.auth_id auid,
-                            tw.abs abs
+                            tw.abs abs,
+                            tw.doi
                         FROM top_works tw
                         LEFT JOIN w_auth wa ON tw.id = wa.id
                         )
-                        SELECT awd.id, awd.title, array_agg(awd.auid) as auid_array, awd.distance, array_agg(a_names.orcid) AS orcid_array, array_agg(a_names.name) AS name_array, awd.abs as abs
+                        SELECT awd.id, awd.title, array_agg(awd.auid) as auid_array, awd.distance, array_agg(a_names.orcid) AS orcid_array, array_agg(a_names.name) AS name_array, awd.abs as abs, awd.doi as doi
                         FROM awd 
                         LEFT JOIN a_names ON awd.auid = a_names.id
-                        GROUP BY awd.id, awd.title, awd.distance, awd.abs
+                        GROUP BY awd.id, awd.title, awd.distance, awd.abs, awd.doi
                         ORDER BY awd.distance
                         '''
                 try:
@@ -458,16 +461,20 @@ def queryresearch():
                     
                     print(" 4 ok ", datetime.now().strftime("%H:%M:%S"))
                   
-
+                    
                     results_list = [
-                        {"id": row[0], "title": row[1], "auid": row[2], "distance": row[3], "orcid": row[4], "name": row[5],"abstract": convert_inverted(ast.literal_eval(row[6]))} 
+                        {"id": row[0], "title": row[1], "auid": row[2], "distance": row[3], "orcid": row[4], "name": row[5], "abstract": convert_inverted(ast.literal_eval(row[6])), "doi":row[7]} 
                         for row in results
                     ]
+
+                    abstracts = [convert_inverted(ast.literal_eval(row[6])) for row in results]
+                    summary = summarize_abs (abstracts)
+
                     
                     # Step 5: Release the connection back to the pool
                     pg_pool.putconn(conn)
 
-                    return jsonify(results_list)
+                    return jsonify({"results": results_list, "summary":summary})
                 except Exception as e:
                     print(e)
                     return jsonify({"error": str(e)}), 500
@@ -588,7 +595,31 @@ def check_for_coi_coauthors(expert, authors):
 
     return [expert_id, coauthorships]
 
+def summarize_abs(abstracts):
+    ai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
+
+    # Create the model
+    generation_config = {
+    "temperature": 1,
+    "top_p": 0.95,
+    "top_k": 64,
+    "max_output_tokens": 8192,
+    "response_mime_type": "text/plain",
+    }
+
+    model = ai.GenerativeModel(
+    model_name="gemini-1.5-flash",
+    generation_config=generation_config,
+    )
+
+    chat_session = model.start_chat(
+    history=[]
+    )
+    query='Summarize the main scientific result from the following abstracts in 1 sentence, without any of your own interpretation. Be concise, and direct, as if you were a scientist stating facts.' + '\n' + str(abstracts)
+    response = chat_session.send_message(query)
+
+    return response.text
 
 if __name__ == "__main__":
     app.run(debug=True)
