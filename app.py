@@ -468,7 +468,7 @@ def queryresearch():
                     ]
 
                     abstracts = [convert_inverted(ast.literal_eval(row[6])) for row in results]
-                    summary = summarize_abs (abstracts)
+                    summary = summarize_abs (data, abstracts)
 
                     
                     # Step 5: Release the connection back to the pool
@@ -595,7 +595,7 @@ def check_for_coi_coauthors(expert, authors):
 
     return [expert_id, coauthorships]
 
-def summarize_abs(abstracts):
+def summarize_abs(data, abstracts):
     ai.configure(api_key=os.environ["GEMINI_API_KEY"])
 
 
@@ -616,7 +616,8 @@ def summarize_abs(abstracts):
     chat_session = model.start_chat(
     history=[]
     )
-    query='Summarize the main scientific result from the following abstracts in 1 sentence, without any of your own interpretation. Be concise, and direct, as if you were a scientist stating facts.' + '\n' + str(abstracts)
+    query='User query:"' + data +'". Given this user query, summarize the main scientific result from the following abstracts in 1 sentence. Be concise, and direct, as if you were a scientist stating facts. Summary should be based on all abstracts, not just one. If the user query is a question, answer it only on the follwoing abstracts. If the question is yes/no question, include "YES" or "NO" or "UNCERTAIN" based on abstracts. If it is not a question, just summarize them. Abstracts:' + '\n' + str(abstracts)
+    print(query);
     response = chat_session.send_message(query)
 
     return response.text
