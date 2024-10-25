@@ -422,15 +422,19 @@ def queryresearch():
                                 ev.embedding <=> %s::vector AS distance, 
                                 wt.title AS title,
                                 COALESCE(was.inv_abstract, wae.inv_abstract) AS abs,
-                                COALESCE(was.doi, wae.doi) AS doi
+                                COALESCE(was.doi, wae.doi) AS doi,
+                                oaw.publication_year as year,
+                                oaw.cited_by_count as citations
 
                                 
                             FROM e5_vectors ev
                             LEFT JOIN w_titles wt ON ev.id = wt.id
                             LEFT JOIN w_abs_sn was ON ev.id = was.id
                             LEFT JOIN w_abs_els wae  ON ev.id = wae.id
+                            LEFT JOIN oa_works oaw ON ev.id = oaw.id
                             
-                            WHERE LENGTH(COALESCE(was.inv_abstract, wae.inv_abstract)) > 50
+                            WHERE LENGTH(COALESCE(was.inv_abstract, wae.inv_abstract)) > 50 
+                            AND oaw.cited_by_count > 10
                             ORDER BY distance
                             LIMIT 20
                         ),
@@ -440,14 +444,16 @@ def queryresearch():
                             tw.title, 
                             wa.auth_id auid,
                             tw.abs abs,
-                            tw.doi
+                            tw.doi,
+                            tw.year,
+                            tw.citations
                         FROM top_works tw
                         LEFT JOIN w_auth wa ON tw.id = wa.id
                         )
-                        SELECT awd.id, awd.title, array_agg(awd.auid) as auid_array, awd.distance, array_agg(a_names.orcid) AS orcid_array, array_agg(a_names.name) AS name_array, awd.abs as abs, awd.doi as doi
+                        SELECT awd.id, awd.title, array_agg(awd.auid) as auid_array, awd.distance, array_agg(a_names.orcid) AS orcid_array, array_agg(a_names.name) AS name_array, awd.abs as abs, awd.doi as doi, awd.year, awd.citations
                         FROM awd 
                         LEFT JOIN a_names ON awd.auid = a_names.id
-                        GROUP BY awd.id, awd.title, awd.distance, awd.abs, awd.doi
+                        GROUP BY awd.id, awd.title, awd.distance, awd.abs, awd.doi, awd.year, awd.citations
                         ORDER BY awd.distance
                         '''
                 try:
@@ -459,9 +465,10 @@ def queryresearch():
                   
                     
                     results_list = [
-                        {"id": row[0], "title": row[1], "auid": row[2], "distance": row[3], "orcid": row[4], "name": row[5], "abstract": convert_inverted(ast.literal_eval(row[6])), "doi":row[7]} 
+                        {"id": row[0], "title": row[1], "auid": row[2], "distance": row[3], "orcid": row[4], "name": row[5], "abstract": convert_inverted(ast.literal_eval(row[6])), "doi":row[7], "year":row[8], "citations":row[9]} 
                         for row in results
                     ]
+
 
                     abstracts = [convert_inverted(ast.literal_eval(row[6])) for row in results]
                     summary = summarize_abs (data, abstracts)
@@ -663,7 +670,7 @@ def summarize_abs(data, abstracts):
 
     # Create the model
     generation_config = {
-    "temperature": 1,
+    "temperature": 0.5,
     "top_p": 0.95,
     "top_k": 64,
     "max_output_tokens": 8192,
@@ -678,7 +685,7 @@ def summarize_abs(data, abstracts):
     chat_session = model.start_chat(
     history=[]
     )
-    query='User query:"' + data +'". Given this user query, summarize the main scientific result from the following abstracts in 1 sentence. Be concise, and direct, as if you were a scientist stating facts. Summary should be based on all abstracts, not just one. If the user query is a question, answer it only on the follwoing abstracts. If the question is yes/no question, include "YES" or "NO" or "UNCERTAIN" based on abstracts. If it is not a question, just summarize them. Abstracts:' + '\n' + str(abstracts)
+    query='User query:"' + data +'". Given this user query, summarize the main scientific result from the following abstracts in 1 sentence. Be concise, and direct, as if you were a scientist stating facts. Summary should be based on all abstracts, not just one. If the user query is a question, answer it only on the follwoing abstracts. If the question is yes/no question, include "YES" or "NO" or "UNCERTAIN" based on abstracts. If user query is not a question (but a passage or abstract), ignore it, and just summarize the following (but not the user query itself). Abstracts:' + '\n' + str(abstracts)
     print(query);
     response = chat_session.send_message(query)
 
