@@ -10,6 +10,8 @@ import pandas as pd
 import ast
 import json
 import google.generativeai as ai
+import typing_extensions as typing
+
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": ["http://127.0.0.1:8080", "https://exrecapp.web.app", "https://exprlabs.com"]}})
@@ -253,11 +255,6 @@ def queryauthors():
                         result["cois"]=conflicts
                     results_list.append(result)
 
-                    
-                        
-
-               
-
                 #return jsonify(results_list)
                 return jsonify({"results": results_list, "vector": new_embedding})
 
@@ -341,7 +338,6 @@ def match_works():
         except Exception as e:
             print(str(e))
             return jsonify({"error": str(e)}), 500
-
 
 @app.route('/coi-coauthors', methods=['GET'])
 def coi_coauthors():
@@ -483,11 +479,6 @@ def queryresearch():
             return jsonify({"error": str(e)}), 500
     return jsonify({"error": str(e)}), 500
 
-
-
-
-
-
 @app.route('/querytopics', methods=['GET'])
 def querytopics():
     if request.method == 'GET':
@@ -536,6 +527,77 @@ def querytopics():
         except Exception as e:
             return jsonify({"error": str(e)}), 500
     return jsonify({"error": str(e)}), 500
+
+
+@app.route('/pre_review', methods=['POST'])
+def pre_review():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+
+    if file and file.content_type == 'application/pdf':
+        try:
+            # Save the uploaded file temporarily
+            filepath = os.path.join('/tmp', file.filename)  # Use a temporary directory
+            file.save(filepath)
+            ai.configure(api_key="AIzaSyAfO1dlSduFQHwQ7tidvUngiiFK1PJBb7I")
+
+            class Review (typing.TypedDict):
+                title: str
+                research_question: str
+                key_takeaway: str
+                authors: list[str]
+                summary: str
+                methods: list[str]
+                fields: list[str]
+                ethics: str
+                
+            # Create the model
+            generation_config = ai.GenerationConfig(
+                temperature=0.,
+                top_p=0.95,
+                top_k=64,
+                max_output_tokens=8192,
+                response_mime_type="application/json",
+                response_schema=Review  # Not list[Review]
+            )
+
+            model = ai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            generation_config=generation_config)
+            
+            doc = ai.upload_file(filepath)
+            
+
+            query = '''Generate a  summary of the attached research paper in JSON format, strictly adhering to the structure defined by the 'Review' type. 
+            Include:
+            the title, 
+            main research question in one sentence and inquestion form,
+            one sentence key takeaway,
+            author list,
+            a longer summary (what they did, how, what htey found, one paragraph at most),
+            the scientific method names employed (including statistical techniques),
+            science fields that paper belongs to,
+            any ethics or IRB approval/waiver that they mention.
+            If you cannot find data in the document, output None.'''
+            response = model.generate_content( [query, doc])
+
+            parsed = json.loads(response.text)
+            print(json.dumps(parsed, indent=4))
+
+            
+
+            # Remove the temporary file
+            os.remove(filepath)
+
+            # Return the parsed JSON response
+            return jsonify(parsed)
+
+        except Exception as e:
+            return jsonify({'error': str(e)}),
 
 
 
