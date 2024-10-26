@@ -11,6 +11,7 @@ import ast
 import json
 import google.generativeai as ai
 import typing_extensions as typing
+import enum
 
 
 app = Flask(__name__)
@@ -416,7 +417,7 @@ def queryresearch():
                 print(' 3 Executing sql query calculating distances', datetime.now().strftime("%H:%M:%S"))
 
                 sql_query='''
-                        SET LOCAL hnsw.ef_search = 20;
+                        SET LOCAL hnsw.ef_search = 200;
                         WITH top_works AS (
                             SELECT ev.id, 
                                 ev.embedding <=> %s::vector AS distance, 
@@ -433,7 +434,9 @@ def queryresearch():
                             LEFT JOIN w_abs_els wae  ON ev.id = wae.id
                             LEFT JOIN oa_works oaw ON ev.id = oaw.id
                             
-                            WHERE LENGTH(COALESCE(was.inv_abstract, wae.inv_abstract)) > 50 
+
+                            WHERE (SELECT MAX(extracted_number) 
+                            FROM (SELECT unnest(regexp_matches(COALESCE(was.inv_abstract, wae.inv_abstract), '(?<!")\d+(?!")', 'g'))::bigint AS extracted_number) AS subquery) BETWEEN 20 AND 500 
                             AND oaw.cited_by_count > 10
                             ORDER BY distance
                             LIMIT 20
@@ -552,6 +555,16 @@ def pre_review():
             file.save(filepath)
             ai.configure(api_key="AIzaSyAfO1dlSduFQHwQ7tidvUngiiFK1PJBb7I")
 
+            class HumanStudy(enum.Enum):
+                human = "human"
+                non_human = "non_human"
+                human_s_data = "secondary human data"
+
+            class ArticleType(enum.Enum):
+                primary = "primary research"
+                lit_review = "narrative literature review"
+                sys_review = "systematic review / meta-analysis"
+
             class Review (typing.TypedDict):
                 title: str
                 research_question: str
@@ -561,6 +574,9 @@ def pre_review():
                 methods: list[str]
                 fields: list[str]
                 ethics: str
+                human_study: HumanStudy
+                data: str
+                article_type: ArticleType
                 
             # Create the model
             generation_config = ai.GenerationConfig(
@@ -588,7 +604,10 @@ def pre_review():
             a longer summary (what they did, how, what htey found, one paragraph at most),
             the scientific method names employed (including statistical techniques),
             science fields that paper belongs to,
-            any ethics or IRB approval/waiver that they mention.
+            any ethics or IRB approval/waiver that they mention,
+            whether this is a human subjects study with human participants,
+            do they share their research data (this is usually in a section on data sharing),
+            and article type.
             If you cannot find data in the document, output None.'''
             response = model.generate_content( [query, doc])
 
@@ -685,7 +704,7 @@ def summarize_abs(data, abstracts):
     chat_session = model.start_chat(
     history=[]
     )
-    query='User query:"' + data +'". Given this user query, summarize the main scientific result from the following abstracts in 1 sentence. Be concise, and direct, as if you were a scientist stating facts. Summary should be based on all abstracts, not just one. If the user query is a question, answer it only on the follwoing abstracts. If the question is yes/no question, include "YES" or "NO" or "UNCERTAIN" based on abstracts. If user query is not a question (but a passage or abstract), ignore it, and just summarize the following (but not the user query itself). Abstracts:' + '\n' + str(abstracts)
+    query='User query:"' + data +'". Given this user query, summarize the main scientific result from the following abstracts in 1 sentence. Be concise, and direct, as if you were a scientist stating facts. Summary should be based on all abstracts, not just one. If the user query is a question, answer it only on the follwoing abstracts. If the question is yes/no question, include "Yes" or "No" or "Uncertain" based on abstracts at the beginning of your answer. If user query is not a question (but a passage or abstract), ignore it, and just summarize the following (but not the user query itself). Base your answers only on the abstracts below and nothing else. Abstract array:' + '\n' + str(abstracts)
     print(query);
     response = chat_session.send_message(query)
 
