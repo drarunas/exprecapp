@@ -705,10 +705,43 @@ def summarize_abs(data, abstracts):
     history=[]
     )
     query='User query:"' + data +'". Given this user query, summarize the main scientific result from the following abstracts in 1 sentence. Be concise, and direct, as if you were a scientist stating facts. Summary should be based on all abstracts, not just one. If the user query is a question, answer it only on the follwoing abstracts. If the question is yes/no question, include "Yes" or "No" or "Uncertain" based on abstracts at the beginning of your answer. If user query is not a question (but a passage or abstract), ignore it, and just summarize the following (but not the user query itself). Base your answers only on the abstracts below and nothing else. Abstract array:' + '\n' + str(abstracts)
-    print(query);
     response = chat_session.send_message(query)
 
     return response.text
+
+
+@app.route('/summarize_study', methods=['POST'])
+def summarize_study():
+    data = request.get_json()
+    if 'abstract' not in data:
+        return jsonify({'error': 'No abstract'}), 400
+    abstract = data['abstract']
+
+    ai.configure(api_key=os.environ["GEMINI_API_KEY"])
+    # Create the model
+    generation_config = {
+    "temperature": 0.5,
+    "top_p": 0.95,
+    "top_k": 64,
+    "max_output_tokens": 8192,
+    "response_mime_type": "text/plain",
+    }
+
+    model = ai.GenerativeModel(
+    model_name="gemini-1.5-flash",
+    generation_config=generation_config,
+    )
+
+    chat_session = model.start_chat(
+    history=[]
+    )
+    query='Provide a one sentence summary of the following abstract. Be concise, but specific, mentioning facts such as number of participants, country, and similar. Using direct language, and to not start with "this study/this abstract" or similar. Abstract:' + '\n' + str(abstract)
+    
+    response = chat_session.send_message(query)
+
+    return jsonify({"summary": response.text})
+
+
 
 if __name__ == "__main__":
     app.run(debug=True)
