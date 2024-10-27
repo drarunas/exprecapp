@@ -221,6 +221,7 @@ def queryauthors():
                 
                 
                 pg_pool.putconn(conn)
+                
 
                
                 results_list = []
