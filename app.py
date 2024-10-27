@@ -473,14 +473,13 @@ def queryresearch():
                     ]
 
 
-                    abstracts = [convert_inverted(ast.literal_eval(row[6])) for row in results]
-                    summary = summarize_abs (data, abstracts)
-
+                    #abstracts = [convert_inverted(ast.literal_eval(row[6])) for row in results]
+                    
                     
                     # Step 5: Release the connection back to the pool
                     pg_pool.putconn(conn)
 
-                    return jsonify({"results": results_list, "summary":summary})
+                    return jsonify({"results": results_list})
                 except Exception as e:
                     print(e)
                     return jsonify({"error": str(e)}), 500
@@ -577,6 +576,9 @@ def pre_review():
                 human_study: HumanStudy
                 data: str
                 article_type: ArticleType
+                sample_size: int
+                known: str
+                new_advance: str
                 
             # Create the model
             generation_config = ai.GenerationConfig(
@@ -607,7 +609,10 @@ def pre_review():
             any ethics or IRB approval/waiver that they mention,
             whether this is a human subjects study with human participants,
             do they share their research data (this is usually in a section on data sharing),
-            and article type.
+            and article type,
+            sample size (for example, how many participants, or None),
+            what they say has been known before,
+            what they say is new in what's discovered here over what's been known before (describe and include verbatim quotes),
             If you cannot find data in the document, output None.'''
             response = model.generate_content( [query, doc])
 
@@ -735,13 +740,80 @@ def summarize_study():
     chat_session = model.start_chat(
     history=[]
     )
-    query='Provide a one sentence summary of the following abstract. Be concise, but specific, mentioning facts such as number of participants, country, and similar. Using direct language, and to not start with "this study/this abstract" or similar. Abstract:' + '\n' + str(abstract)
+    query='Provide a one sentence summary of the following research results. Be concise, but specific, mentioning facts such as number of participants, country, and similar. Abstract:' + '\n' + str(abstract)
     
     response = chat_session.send_message(query)
 
     return jsonify({"summary": response.text})
 
+@app.route('/summarize_research_results', methods=['POST'])
+def summarize_research_results():
+    data = request.get_json()
+    
+    if 'abstracts' not in data:
+        return jsonify({'error': 'No abstracts'}), 400
+    if 'query' not in data:
+        return jsonify({'error': 'No user query'}), 400
 
+    abstracts = data['abstracts']
+    user_query = data['query']
+
+    class QueryType(enum.Enum):
+        question = "question"
+        research_summary = "research_summary"
+
+    class QueryDesc(typing.TypedDict):
+        type: QueryType
+                
+
+
+    ai.configure(api_key=os.environ["GEMINI_API_KEY"])
+    # Create the model
+    generation_config = ai.GenerationConfig(
+        temperature=0.5,
+        top_p=0.95,
+        top_k=64,
+        max_output_tokens=8192,
+        response_mime_type="application/json",
+        response_schema=QueryDesc
+    )
+    
+
+    model = ai.GenerativeModel(
+    model_name="gemini-1.5-flash",
+    generation_config=generation_config,
+    )
+
+
+    # query='User query:"' + user_query +'". Given this user query, summarize the main scientific result from the following abstracts in 1 sentence. Be concise, and direct, as if you were a scientist stating facts. Summary should be based on all abstracts, not just one. If the user query is a question (one sentence), answer it only on the follwoing abstracts. If user query is not a question (but a passage or abstract longer than one sentence), ignore it, and just summarize the following (but not the user query itself). Base your answers only on the abstracts below and nothing else.  Abstract array:' + '\n' + str(abstracts)
+
+    query='User query:  ' + user_query + '. What it the type of this query?.'
+    response = model.generate_content(query)
+    print(response.text)
+    generation_config = ai.GenerationConfig(
+        temperature=0.5,
+        top_p=0.95,
+        top_k=64,
+        max_output_tokens=8192,
+        response_mime_type="text/plain",
+    )
+
+    model = ai.GenerativeModel(
+    model_name="gemini-1.5-flash",
+    generation_config=generation_config,
+    )
+
+    if json.loads(response.text)["type"] == "question":
+        print('Answering q')
+        query='User question: ' + user_query + '. Given only research studies below, answer this question in one sentence. Base your answer only on the text below and nothing else.  If it is a yes/no question, start by syaing yes or no. Research studies:' + '\n' + str(abstracts)
+    else:        
+        query=' Prior studies: ' + str(abstracts) + '. In 2 sentences, summarize Prior Studies. use the following format: "Prior studies have shown that... .". Describing prior studies, provide a reference to the work where the specific fact comes from in [Name et al YEAR] format.'
+
+    
+    response = model.generate_content(query)
+
+
+    return jsonify({"summary": response.text})
 
 if __name__ == "__main__":
     app.run(debug=True)
