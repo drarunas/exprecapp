@@ -436,7 +436,7 @@ def queryresearch():
                             
 
                             WHERE (SELECT MAX(extracted_number) 
-                            FROM (SELECT unnest(regexp_matches(COALESCE(was.inv_abstract, wae.inv_abstract), '(?<!")\d+(?!")', 'g'))::bigint AS extracted_number) AS subquery) BETWEEN 20 AND 500 
+                            FROM (SELECT unnest(regexp_matches(COALESCE(was.inv_abstract, wae.inv_abstract), '(?<!")\d+(?!")', 'g'))::bigint AS extracted_number) AS subquery) BETWEEN 20 AND 1000 
                             AND oaw.cited_by_count > 10
                             ORDER BY distance
                             LIMIT 20
@@ -741,8 +741,12 @@ def summarize_study():
     history=[]
     )
     query='Provide a one sentence summary of the following research results. Be concise, but specific, mentioning facts such as number of participants, country, and similar. Abstract:' + '\n' + str(abstract)
-    
-    response = chat_session.send_message(query)
+    try:
+        response = chat_session.send_message(query)
+    except ai.types.generation_types.StopCandidateException as e:
+        # Log the exception or return a safe message
+        response = {"error": "The response was flagged for safety by the model. You can still read the full summary below."}
+        return jsonify({"summary": response["error"]})
 
     return jsonify({"summary": response.text})
 
