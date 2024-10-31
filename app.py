@@ -12,6 +12,9 @@ import json
 import google.generativeai as ai
 import typing_extensions as typing
 import enum
+import requests
+import asyncio
+import aiohttp
 
 
 app = Flask(__name__)
@@ -221,7 +224,7 @@ def queryauthors():
                 
                 
                 pg_pool.putconn(conn)
-                
+
 
                
                 results_list = []
@@ -417,30 +420,70 @@ def queryresearch():
                 # Step 3: Execute the SQL query using the new embedding
                 print(' 3 Executing sql query calculating distances', datetime.now().strftime("%H:%M:%S"))
 
+                # sql_query='''
+                #         SET LOCAL hnsw.ef_search = 200;
+                #         WITH top_works AS (
+                #             SELECT ev.id, 
+                #                 ev.embedding <=> %s::vector AS distance, 
+                #                 wt.title AS title,
+                #                 COALESCE(was.inv_abstract, wae.inv_abstract) AS abs,
+                #                 COALESCE(was.doi, wae.doi) AS doi,
+                #                 oaw.publication_year as year,
+                #                 oaw.cited_by_count as citations
+
+                                
+                #             FROM e5_vectors ev
+                #             LEFT JOIN w_titles wt ON ev.id = wt.id
+                #             LEFT JOIN w_abs_sn was ON ev.id = was.id
+                #             LEFT JOIN w_abs_els wae  ON ev.id = wae.id
+                #             LEFT JOIN oa_works oaw ON ev.id = oaw.id
+                            
+
+                #             WHERE (SELECT MAX(extracted_number) 
+                #             FROM (SELECT unnest(regexp_matches(COALESCE(was.inv_abstract, wae.inv_abstract), '(?<!")\d+(?!")', 'g'))::bigint AS extracted_number) AS subquery) BETWEEN 50 AND 1000 
+                #             AND oaw.cited_by_count > 10
+                #             ORDER BY distance
+                #             LIMIT 20
+                #         ),
+                #         awd AS (
+                #         SELECT tw.id, 
+                #             tw.distance, 
+                #             tw.title, 
+                #             wa.auth_id auid,
+                #             tw.abs abs,
+                #             tw.doi,
+                #             tw.year,
+                #             tw.citations
+                #         FROM top_works tw
+                #         LEFT JOIN w_auth wa ON tw.id = wa.id
+                #         )
+                #         SELECT awd.id, awd.title, array_agg(awd.auid) as auid_array, awd.distance, array_agg(a_names.orcid) AS orcid_array, array_agg(a_names.name) AS name_array, awd.abs as abs, awd.doi as doi, awd.year, awd.citations
+                #         FROM awd 
+                #         LEFT JOIN a_names ON awd.auid = a_names.id
+                #         GROUP BY awd.id, awd.title, awd.distance, awd.abs, awd.doi, awd.year, awd.citations
+                #         ORDER BY awd.distance
+                #         '''
                 sql_query='''
                         SET LOCAL hnsw.ef_search = 200;
                         WITH top_works AS (
                             SELECT ev.id, 
                                 ev.embedding <=> %s::vector AS distance, 
-                                wt.title AS title,
-                                COALESCE(was.inv_abstract, wae.inv_abstract) AS abs,
-                                COALESCE(was.doi, wae.doi) AS doi,
+                                oaw.title AS title,
+                                oaw.abstract_inverted_index AS abs,
+                                oaw.doi AS doi,
                                 oaw.publication_year as year,
                                 oaw.cited_by_count as citations
 
                                 
                             FROM e5_vectors ev
-                            LEFT JOIN w_titles wt ON ev.id = wt.id
-                            LEFT JOIN w_abs_sn was ON ev.id = was.id
-                            LEFT JOIN w_abs_els wae  ON ev.id = wae.id
                             LEFT JOIN oa_works oaw ON ev.id = oaw.id
                             
 
                             WHERE (SELECT MAX(extracted_number) 
-                            FROM (SELECT unnest(regexp_matches(COALESCE(was.inv_abstract, wae.inv_abstract), '(?<!")\d+(?!")', 'g'))::bigint AS extracted_number) AS subquery) BETWEEN 20 AND 1000 
-                            AND oaw.cited_by_count > 10
+                            FROM (SELECT unnest(regexp_matches(oaw.abstract_inverted_index, '(?<!")\d+(?!")', 'g'))::bigint AS extracted_number) AS subquery) BETWEEN 50 AND 1000 
+                            AND oaw.cited_by_count > 1
                             ORDER BY distance
-                            LIMIT 20
+                            LIMIT 50
                         ),
                         awd AS (
                         SELECT tw.id, 
@@ -726,7 +769,7 @@ def summarize_study():
     ai.configure(api_key=os.environ["GEMINI_API_KEY"])
     # Create the model
     generation_config = {
-    "temperature": 0.5,
+    "temperature": 0.2,
     "top_p": 0.95,
     "top_k": 64,
     "max_output_tokens": 8192,
@@ -741,7 +784,7 @@ def summarize_study():
     chat_session = model.start_chat(
     history=[]
     )
-    query='Provide a one sentence summary of the following research results. Be concise, but specific, mentioning facts such as number of participants, country, and similar. Abstract:' + '\n' + str(abstract)
+    query='Provide a one sentence summary of the following research results. Be concise, but specific, mentioning facts. Answer based only on the following research summary. Study:' + '\n' + str(abstract)
     try:
         response = chat_session.send_message(query)
     except ai.types.generation_types.StopCandidateException as e:
@@ -750,6 +793,37 @@ def summarize_study():
         return jsonify({"summary": response["error"]})
 
     return jsonify({"summary": response.text})
+
+
+
+def fetch_passage_summary(passage, index, user_query):
+    url = "https://generativelanguage.googleapis.com/v1beta/models/aqa:generateAnswer"
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "contents": [{"parts": [{"text": user_query}]}],
+        "answer_style": "ABSTRACTIVE",
+        "inline_passages": {"passages": [passage]}
+    }
+    
+    response = requests.post(url, headers=headers, params={"key": os.environ["GEMINI_API_KEY"]}, data=json.dumps(data))
+    response_data = response.json()
+    print(response_data["answer"]["content"])
+    print("...")
+    
+    text_content = response_data["answer"]["content"]["parts"][0]["text"]
+    passage_ids = [
+        attr["sourceId"]["groundingPassage"]["passageId"]
+        for attr in response_data["answer"]["groundingAttributions"]
+    ]
+    
+    return {"summary": text_content, "passageIds": passage_ids, "index": index}
+
+def run_queries_sequentially(passages, user_query):
+    results = []
+    for index, passage in enumerate(passages):
+        result = fetch_passage_summary(passage, index, user_query)
+        results.append(result)
+    return results
 
 @app.route('/summarize_research_results', methods=['POST'])
 def summarize_research_results():
@@ -762,6 +836,7 @@ def summarize_research_results():
 
     abstracts = data['abstracts']
     user_query = data['query']
+    passages = [{"id": str(index + 1), "content": {"parts": [{"text": item['abstract']}]}} for index, item in enumerate(abstracts)]
 
     class QueryType(enum.Enum):
         question = "question"
@@ -773,28 +848,26 @@ def summarize_research_results():
 
 
     ai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    # Create the model
     generation_config = ai.GenerationConfig(
-        temperature=0.5,
+        temperature=0.9,
         top_p=0.95,
         top_k=64,
         max_output_tokens=8192,
         response_mime_type="application/json",
         response_schema=QueryDesc
     )
-    
-
     model = ai.GenerativeModel(
     model_name="gemini-1.5-flash",
     generation_config=generation_config,
     )
 
-
-    # query='User query:"' + user_query +'". Given this user query, summarize the main scientific result from the following abstracts in 1 sentence. Be concise, and direct, as if you were a scientist stating facts. Summary should be based on all abstracts, not just one. If the user query is a question (one sentence), answer it only on the follwoing abstracts. If user query is not a question (but a passage or abstract longer than one sentence), ignore it, and just summarize the following (but not the user query itself). Base your answers only on the abstracts below and nothing else.  Abstract array:' + '\n' + str(abstracts)
-
-    query='User query:  ' + user_query + '. What it the type of this query?.'
-    response = model.generate_content(query)
-    print(response.text)
+    query='User query:  ' + user_query + '. What is the type of this query -- a question of any kind, or a research summary?'
+    try:
+        response = model.generate_content(query)
+    except ai.types.generation_types.StopCandidateException as e:
+        # Log the exception or return a safe message
+        response = {"error": "The response was flagged for safety by the model. You can still read the full summary below."}
+        return jsonify({"summary": response["error"]})
     generation_config = ai.GenerationConfig(
         temperature=0.5,
         top_p=0.95,
@@ -808,14 +881,45 @@ def summarize_research_results():
     generation_config=generation_config,
     )
 
+        
     if json.loads(response.text)["type"] == "question":
-        print('Answering q')
+        
+
+        url = "https://generativelanguage.googleapis.com/v1beta/models/aqa:generateAnswer"
+        headers = {"Content-Type": "application/json"}
+        data = {
+            "contents": [{
+                "parts": [{"text": user_query}]
+            }],
+            "answer_style": "ABSTRACTIVE",
+            "inline_passages": {
+                "passages": passages
+            }
+        }
+
+        # aqa_response = requests.post(url, headers=headers, params={"key": "AIzaSyAfO1dlSduFQHwQ7tidvUngiiFK1PJBb7I"}, data=json.dumps(data))
+        # print(json.dumps(aqa_response.json(), indent=4))
         query='User question: ' + user_query + '. Given only research studies below, answer this question in one sentence. Base your answer only on the text below and nothing else.  If it is a yes/no question, start by syaing yes or no. Research studies:' + '\n' + str(abstracts)
+        # text_content = aqa_response.json()["answer"]["content"]["parts"][0]["text"]
+        # passage_ids = [attr["sourceId"]["groundingPassage"]["passageId"] for attr in aqa_response.json()["answer"]["groundingAttributions"]]
+        # print (text_content)
+        # print(passage_ids)
+        # return jsonify({"summary": text_content, "passageIds": passage_ids})
+
+
+
+
+
     else:        
         query=' Prior studies: ' + str(abstracts) + '. In 2 sentences, summarize Prior Studies. use the following format: "Prior studies have shown that... .". Describing prior studies, provide a reference to the work where the specific fact comes from in [Name et al YEAR] format.'
 
-    
-    response = model.generate_content(query)
+    try:
+        response = model.generate_content(query)
+        
+    except ai.types.generation_types.StopCandidateException as e:
+        # Log the exception or return a safe message
+        response = {"error": "The response was flagged for safety by the model."}
+        return jsonify({"summary": response["error"]})
 
 
     return jsonify({"summary": response.text})
