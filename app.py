@@ -13,8 +13,7 @@ import google.generativeai as ai
 import typing_extensions as typing
 import enum
 import requests
-import asyncio
-import aiohttp
+
 
 
 app = Flask(__name__)
@@ -481,7 +480,7 @@ def queryresearch():
 
                             WHERE (SELECT MAX(extracted_number) 
                             FROM (SELECT unnest(regexp_matches(oaw.abstract_inverted_index, '(?<!")\d+(?!")', 'g'))::bigint AS extracted_number) AS subquery) BETWEEN 50 AND 1000 
-                            AND oaw.cited_by_count > 1
+                            AND oaw.cited_by_count > 10
                             ORDER BY distance
                             LIMIT 50
                         ),
@@ -489,13 +488,13 @@ def queryresearch():
                         SELECT tw.id, 
                             tw.distance, 
                             tw.title, 
-                            wa.auth_id auid,
+                            wa.author_id auid,
                             tw.abs abs,
                             tw.doi,
                             tw.year,
                             tw.citations
                         FROM top_works tw
-                        LEFT JOIN w_auth wa ON tw.id = wa.id
+                        LEFT JOIN w_authorships wa ON tw.id = wa.work_id
                         )
                         SELECT awd.id, awd.title, array_agg(awd.auid) as auid_array, awd.distance, array_agg(a_names.orcid) AS orcid_array, array_agg(a_names.name) AS name_array, awd.abs as abs, awd.doi as doi, awd.year, awd.citations
                         FROM awd 
@@ -509,8 +508,7 @@ def queryresearch():
                     results = cur.fetchall()
                     
                     print(" 4 ok ", datetime.now().strftime("%H:%M:%S"))
-                  
-                    
+
                     results_list = [
                         {"id": row[0], "title": row[1], "auid": row[2], "distance": row[3], "orcid": row[4], "name": row[5], "abstract": convert_inverted(ast.literal_eval(row[6])), "doi":row[7], "year":row[8], "citations":row[9]} 
                         for row in results
