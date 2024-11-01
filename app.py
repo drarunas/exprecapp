@@ -6,7 +6,6 @@ import psycopg2
 from psycopg2 import pool
 import os
 from datetime import datetime
-import pandas as pd
 import ast
 import json
 import google.generativeai as ai
@@ -188,7 +187,7 @@ def queryauthors():
                     (
                     SELECT AUS.auth_id, af.aff_name, af.year
                     FROM AUS
-                    INNER JOIN a_aff_history af ON AUS.auth_id = af.id
+                    LEFT JOIN a_aff_history af ON AUS.auth_id = af.auth_id
                     ),
                     AGGAFFS AS
                     (
@@ -463,7 +462,7 @@ def queryresearch():
                 #         ORDER BY awd.distance
                 #         '''
                 sql_query='''
-                        SET LOCAL hnsw.ef_search = 200;
+                        SET LOCAL hnsw.ef_search = 100;
                         WITH top_works AS (
                             SELECT ev.id, 
                                 ev.embedding <=> %s::vector AS distance, 
@@ -471,15 +470,18 @@ def queryresearch():
                                 oaw.abstract_inverted_index AS abs,
                                 oaw.doi AS doi,
                                 oaw.publication_year as year,
-                                oaw.cited_by_count as citations
+                                oaw.cited_by_count as citations,
+                                oas.display_name as journal
 
                                 
                             FROM e5_vectors ev
                             LEFT JOIN oa_works oaw ON ev.id = oaw.id
+                            LEFT JOIN oa_primary_locations opl ON ev.id = opl.work_id
+                            LEFT JOIN oa_sources oas ON opl.source_id = oas.id
                             
 
                             WHERE (SELECT MAX(extracted_number) 
-                            FROM (SELECT unnest(regexp_matches(oaw.abstract_inverted_index, '(?<!")\d+(?!")', 'g'))::bigint AS extracted_number) AS subquery) BETWEEN 50 AND 1000 
+                            FROM (SELECT unnest(regexp_matches(oaw.abstract_inverted_index, '(?<!")\d+(?!")', 'g'))::bigint AS extracted_number) AS subquery) BETWEEN 80 AND 1000 
                             AND oaw.cited_by_count > 10
                             ORDER BY distance
                             LIMIT 50
@@ -492,14 +494,15 @@ def queryresearch():
                             tw.abs abs,
                             tw.doi,
                             tw.year,
-                            tw.citations
+                            tw.citations,
+                            tw.journal journal
                         FROM top_works tw
-                        LEFT JOIN w_authorships wa ON tw.id = wa.work_id
+                        LEFT JOIN oa_w_authorships wa ON tw.id = wa.work_id
                         )
-                        SELECT awd.id, awd.title, array_agg(awd.auid) as auid_array, awd.distance, array_agg(a_names.orcid) AS orcid_array, array_agg(a_names.name) AS name_array, awd.abs as abs, awd.doi as doi, awd.year, awd.citations
+                        SELECT awd.id, awd.title, array_agg(awd.auid) as auid_array, awd.distance, array_agg(oaa.orcid) AS orcid_array, array_agg(oaa.display_name) AS name_array, awd.abs as abs, awd.doi as doi, awd.year, awd.citations, awd.journal
                         FROM awd 
-                        LEFT JOIN a_names ON awd.auid = a_names.id
-                        GROUP BY awd.id, awd.title, awd.distance, awd.abs, awd.doi, awd.year, awd.citations
+                        LEFT JOIN oa_authors oaa ON awd.auid = oaa.id
+                        GROUP BY awd.id, awd.title, awd.distance, awd.abs, awd.doi, awd.year, awd.citations, awd.journal
                         ORDER BY awd.distance
                         '''
                 try:
@@ -510,7 +513,7 @@ def queryresearch():
                     print(" 4 ok ", datetime.now().strftime("%H:%M:%S"))
 
                     results_list = [
-                        {"id": row[0], "title": row[1], "auid": row[2], "distance": row[3], "orcid": row[4], "name": row[5], "abstract": convert_inverted(ast.literal_eval(row[6])), "doi":row[7], "year":row[8], "citations":row[9]} 
+                        {"id": row[0], "title": row[1], "auid": row[2], "distance": row[3], "orcid": row[4], "name": row[5], "abstract": convert_inverted(ast.literal_eval(row[6])), "doi":row[7], "year":row[8], "citations":row[9], "journal":row[10]} 
                         for row in results
                     ]
 
