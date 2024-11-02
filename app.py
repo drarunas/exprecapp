@@ -213,7 +213,7 @@ def queryauthors():
                     INNER JOIN AGGAFFS ON AUS.auth_id = AGGAFFS.auth_id
                     LEFT JOIN AGGTOPS ON AUS.auth_id = AGGTOPS.auth_id
                     LEFT JOIN EMAILS ON AUS.auth_id = EMAILS.auth_id
-                    ORDER BY distance
+                    ORDER BY distance 
                     '''
 
                 cur.execute(sql_query, (new_embedding, with_emails_only, min_h_index, limit, offset))
@@ -401,6 +401,9 @@ def coi_coauthors():
 def queryresearch():
     if request.method == 'GET':
         data = request.args.get('q')
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))  # Default limit
+        offset = (page - 1) * limit
 
         if not data:
             return jsonify({"error": "Missing query text"}), 400
@@ -418,51 +421,9 @@ def queryresearch():
                 # Step 3: Execute the SQL query using the new embedding
                 print(' 3 Executing sql query calculating distances', datetime.now().strftime("%H:%M:%S"))
 
-                # sql_query='''
-                #         SET LOCAL hnsw.ef_search = 200;
-                #         WITH top_works AS (
-                #             SELECT ev.id, 
-                #                 ev.embedding <=> %s::vector AS distance, 
-                #                 wt.title AS title,
-                #                 COALESCE(was.inv_abstract, wae.inv_abstract) AS abs,
-                #                 COALESCE(was.doi, wae.doi) AS doi,
-                #                 oaw.publication_year as year,
-                #                 oaw.cited_by_count as citations
-
-                                
-                #             FROM e5_vectors ev
-                #             LEFT JOIN w_titles wt ON ev.id = wt.id
-                #             LEFT JOIN w_abs_sn was ON ev.id = was.id
-                #             LEFT JOIN w_abs_els wae  ON ev.id = wae.id
-                #             LEFT JOIN oa_works oaw ON ev.id = oaw.id
-                            
-
-                #             WHERE (SELECT MAX(extracted_number) 
-                #             FROM (SELECT unnest(regexp_matches(COALESCE(was.inv_abstract, wae.inv_abstract), '(?<!")\d+(?!")', 'g'))::bigint AS extracted_number) AS subquery) BETWEEN 50 AND 1000 
-                #             AND oaw.cited_by_count > 10
-                #             ORDER BY distance
-                #             LIMIT 20
-                #         ),
-                #         awd AS (
-                #         SELECT tw.id, 
-                #             tw.distance, 
-                #             tw.title, 
-                #             wa.auth_id auid,
-                #             tw.abs abs,
-                #             tw.doi,
-                #             tw.year,
-                #             tw.citations
-                #         FROM top_works tw
-                #         LEFT JOIN w_auth wa ON tw.id = wa.id
-                #         )
-                #         SELECT awd.id, awd.title, array_agg(awd.auid) as auid_array, awd.distance, array_agg(a_names.orcid) AS orcid_array, array_agg(a_names.name) AS name_array, awd.abs as abs, awd.doi as doi, awd.year, awd.citations
-                #         FROM awd 
-                #         LEFT JOIN a_names ON awd.auid = a_names.id
-                #         GROUP BY awd.id, awd.title, awd.distance, awd.abs, awd.doi, awd.year, awd.citations
-                #         ORDER BY awd.distance
-                #         '''
+               
                 sql_query='''
-                        SET LOCAL hnsw.ef_search = 100;
+                        SET LOCAL hnsw.ef_search = 200;
                         WITH top_works AS (
                             SELECT ev.id, 
                                 ev.embedding <=> %s::vector AS distance, 
@@ -484,7 +445,7 @@ def queryresearch():
                             FROM (SELECT unnest(regexp_matches(oaw.abstract_inverted_index, '(?<!")\d+(?!")', 'g'))::bigint AS extracted_number) AS subquery) BETWEEN 80 AND 1000 
                             AND oaw.cited_by_count > 10
                             ORDER BY distance
-                            LIMIT 50
+                            LIMIT %s OFFSET %s
                         ),
                         awd AS (
                         SELECT tw.id, 
@@ -506,7 +467,7 @@ def queryresearch():
                         ORDER BY awd.distance
                         '''
                 try:
-                    cur.execute(sql_query, (new_embedding,))
+                    cur.execute(sql_query, (new_embedding,limit,offset,))
 
                     results = cur.fetchall()
                     
@@ -516,10 +477,7 @@ def queryresearch():
                         {"id": row[0], "title": row[1], "auid": row[2], "distance": row[3], "orcid": row[4], "name": row[5], "abstract": convert_inverted(ast.literal_eval(row[6])), "doi":row[7], "year":row[8], "citations":row[9], "journal":row[10]} 
                         for row in results
                     ]
-
-
-                    #abstracts = [convert_inverted(ast.literal_eval(row[6])) for row in results]
-                    
+                
                     
                     # Step 5: Release the connection back to the pool
                     pg_pool.putconn(conn)
@@ -601,7 +559,7 @@ def pre_review():
 
             class HumanStudy(enum.Enum):
                 human = "human"
-                non_human = "non_human"
+                non_human = "non human"
                 human_s_data = "secondary human data"
 
             class ArticleType(enum.Enum):
@@ -622,8 +580,8 @@ def pre_review():
                 data: str
                 article_type: ArticleType
                 sample_size: int
-                known: str
-                new_advance: str
+                prior_research: str
+                references: list[str]
                 
             # Create the model
             generation_config = ai.GenerationConfig(
@@ -649,15 +607,15 @@ def pre_review():
             one sentence key takeaway,
             author list,
             a longer summary (what they did, how, what htey found, one paragraph at most),
-            the scientific method names employed (including statistical techniques),
-            science fields that paper belongs to,
+            the scientific method names employed (only major methods),
+            main major science field that paper belongs to,
             any ethics or IRB approval/waiver that they mention,
             whether this is a human subjects study with human participants,
             do they share their research data (this is usually in a section on data sharing),
-            and article type,
+            article type,
             sample size (for example, how many participants, or None),
-            what they say has been known before,
-            what they say is new in what's discovered here over what's been known before (describe and include verbatim quotes),
+            what prior research so they describe? give reference numbers from the paper,
+            and list those references including full reference from the reference list in the document (only list references that you included in your answers above, ignore others),
             If you cannot find data in the document, output None.'''
             response = model.generate_content( [query, doc])
 
