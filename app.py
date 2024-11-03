@@ -10,8 +10,11 @@ import ast
 import json
 import google.generativeai as ai
 import typing_extensions as typing
+from typing import  List
 import enum
 import requests
+from collections import Counter
+
 
 
 
@@ -221,7 +224,7 @@ def queryauthors():
                 print(" 4 ok ", datetime.now().strftime("%H:%M:%S"))
                 
                 
-                pg_pool.putconn(conn)
+                #pg_pool.putconn(conn)
 
 
                
@@ -266,6 +269,12 @@ def queryauthors():
         except Exception as e:
             print(str(e))
             return jsonify({"error": str(e)}), 500
+        finally:
+            if conn:
+                print(" 5 Returning connection to the pool", datetime.now().strftime("%H:%M:%S"))
+                pg_pool.putconn(conn)
+
+
     print(str(e))
     return jsonify({"error": str(e)}), 500
 
@@ -324,7 +333,7 @@ def match_works():
                 print('OK', datetime.now().strftime("%H:%M:%S"))
 
                 # Step 4: Return the results
-                pg_pool.putconn(conn)
+                #pg_pool.putconn(conn)
                 
                 results_list = []
                 for row in results:
@@ -341,6 +350,11 @@ def match_works():
         except Exception as e:
             print(str(e))
             return jsonify({"error": str(e)}), 500
+        finally:
+            if conn:
+                print(" 5 Returning connection to the pool", datetime.now().strftime("%H:%M:%S"))
+                pg_pool.putconn(conn)
+
 
 @app.route('/coi-coauthors', methods=['GET'])
 def coi_coauthors():
@@ -402,7 +416,7 @@ def queryresearch():
     if request.method == 'GET':
         data = request.args.get('q')
         page = int(request.args.get('page', 1))
-        limit = int(request.args.get('limit', 10))  # Default limit
+        limit = int(request.args.get('limit', 20))  # Default limit
         offset = (page - 1) * limit
 
         if not data:
@@ -466,29 +480,31 @@ def queryresearch():
                         GROUP BY awd.id, awd.title, awd.distance, awd.abs, awd.doi, awd.year, awd.citations, awd.journal
                         ORDER BY awd.distance
                         '''
-                try:
-                    cur.execute(sql_query, (new_embedding,limit,offset,))
-
-                    results = cur.fetchall()
-                    
-                    print(" 4 ok ", datetime.now().strftime("%H:%M:%S"))
-
-                    results_list = [
-                        {"id": row[0], "title": row[1], "auid": row[2], "distance": row[3], "orcid": row[4], "name": row[5], "abstract": convert_inverted(ast.literal_eval(row[6])), "doi":row[7], "year":row[8], "citations":row[9], "journal":row[10]} 
-                        for row in results
-                    ]
                 
-                    
-                    # Step 5: Release the connection back to the pool
-                    pg_pool.putconn(conn)
+                cur.execute(sql_query, (new_embedding,limit,offset,))
 
-                    return jsonify({"results": results_list})
-                except Exception as e:
-                    print(e)
-                    return jsonify({"error": str(e)}), 500
+                results = cur.fetchall()
+                
+                print(" 4 ok ", datetime.now().strftime("%H:%M:%S"))
+
+                results_list = [
+                    {"id": row[0], "title": row[1], "auid": row[2], "distance": row[3], "orcid": row[4], "name": row[5], "abstract": convert_inverted(ast.literal_eval(row[6])), "doi":row[7], "year":row[8], "citations":row[9], "journal":row[10]} 
+                    for row in results
+                ]
+            
+                
+                # Step 5: Release the connection back to the pool
+                #pg_pool.putconn(conn)
+
+                return jsonify({"results": results_list})
+                
 
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+        finally:
+            if conn:
+                print(" 5 Returning connection to the pool", datetime.now().strftime("%H:%M:%S"))
+                pg_pool.putconn(conn)
     return jsonify({"error": str(e)}), 500
 
 @app.route('/querytopics', methods=['GET'])
@@ -801,9 +817,20 @@ def summarize_research_results():
         question = "question"
         research_summary = "research_summary"
 
+    class YNU(enum.Enum):
+        yes = "yes"
+        no = "no"
+        uncertain = "uncertain"
+
     class QueryDesc(typing.TypedDict):
         type: QueryType
                 
+    class Answer(typing.TypedDict):
+
+        study_number: int
+        answer: YNU
+        explanation: str
+
 
 
     ai.configure(api_key=os.environ["GEMINI_API_KEY"])
@@ -844,44 +871,48 @@ def summarize_research_results():
     if json.loads(response.text)["type"] == "question":
         
 
-        url = "https://generativelanguage.googleapis.com/v1beta/models/aqa:generateAnswer"
-        headers = {"Content-Type": "application/json"}
-        data = {
-            "contents": [{
-                "parts": [{"text": user_query}]
-            }],
-            "answer_style": "ABSTRACTIVE",
-            "inline_passages": {
-                "passages": passages
-            }
-        }
 
-        # aqa_response = requests.post(url, headers=headers, params={"key": "AIzaSyAfO1dlSduFQHwQ7tidvUngiiFK1PJBb7I"}, data=json.dumps(data))
-        # print(json.dumps(aqa_response.json(), indent=4))
-        query='User question: ' + user_query + '. Given only research studies below, answer this question in one sentence. Base your answer only on the text below and nothing else.  If it is a yes/no question, start by syaing yes or no. Research studies:' + '\n' + str(abstracts)
-        # text_content = aqa_response.json()["answer"]["content"]["parts"][0]["text"]
-        # passage_ids = [attr["sourceId"]["groundingPassage"]["passageId"] for attr in aqa_response.json()["answer"]["groundingAttributions"]]
-        # print (text_content)
-        # print(passage_ids)
-        # return jsonify({"summary": text_content, "passageIds": passage_ids})
+        # query='User question: ' + user_query + '. Given only research studies below, answer this question in 2-3 sentences. Base your answer only on the text below and nothing else.  If it is a yes/no question, start by saying yes or no. Be balanced and base your answer only on evidence available in these studies. Research studies:' + '\n' + str(abstracts)
 
+        generation_config = ai.GenerationConfig(
+            temperature=0.5,
+            top_p=0.95,
+            top_k=64,
+            max_output_tokens=8192,
+            response_mime_type="application/json",
+            response_schema=list[Answer]
+        )
 
+        model = ai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        generation_config=generation_config,
+        )
+
+        query='User question: ' + user_query + '. For each of the research studies (summaries) below, answer this question with yes/no/uncertain. Base your answer only on the study text below and nothing else. Including study number and yes/no/uncertain answer, and your 1 sentence explanation of the answer. Summaries:' + '\n' + str(abstracts)
+        response = model.generate_content(query)
+        counts = Counter(entry['answer'] for entry in json.loads(response.text))
+        for field in ["yes", "no", "uncertain"]:
+            counts.setdefault(field, 0)
+        return jsonify({"type": "question", "counts": counts, "summary": json.loads(response.text)})
 
 
 
     else:        
-        query=' Prior studies: ' + str(abstracts) + '. In 2 sentences, summarize Prior Studies. use the following format: "Prior studies have shown that... .". Describing prior studies, provide a reference to the work where the specific fact comes from in [Name et al YEAR] format.'
+        query=' Prior studies: ' + str(abstracts) + '. In 2-4 sentences, summarize Prior Studies. use the following format: "Prior studies have shown that... .". Describing prior studies, provide a reference to the work where the specific fact comes from in [Name et al YEAR] format. Be balanced.'
 
-    try:
-        response = model.generate_content(query)
-        
-    except ai.types.generation_types.StopCandidateException as e:
-        # Log the exception or return a safe message
-        response = {"error": "The response was flagged for safety by the model."}
-        return jsonify({"summary": response["error"]})
+        try:
+            response = model.generate_content(query)
+            
+        except ai.types.generation_types.StopCandidateException as e:
+            # Log the exception or return a safe message
+            response = {"error": "The response was flagged for safety by the model."}
+            return jsonify({"summary": response["error"]})
 
 
-    return jsonify({"summary": response.text})
+        return jsonify({"type":"research", "summary": response.text})
+    
+
+    
 
 if __name__ == "__main__":
     app.run(debug=True)
