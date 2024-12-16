@@ -46,7 +46,7 @@ else:
         maxconn=10,
         dbname='postgres',
         user='exrec',
-        password='wollstonecraft',
+        password='',
         host='34.34.106.184',  # Local PostgreSQL host
         port='5432'
     )
