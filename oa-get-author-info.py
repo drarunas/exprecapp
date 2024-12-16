@@ -9,7 +9,7 @@ import time
 db_params = {
     'dbname': 'postgres',
     'user': 'exrec',
-    'password': 'wollstonecraft',
+    'password': '',
     'host': '34.34.106.184',
     'port': '5432'
 }
