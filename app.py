@@ -35,7 +35,7 @@ if os.getenv('ENV') == 'production':
         maxconn=100,
         dbname='postgres',
         user='exrec',
-        password='wollstonecraft',
+        password='',
         host='/cloudsql/expertrecommender:europe-west4:exrec',  # GCP Unix socket path
         port='5432'
     )
